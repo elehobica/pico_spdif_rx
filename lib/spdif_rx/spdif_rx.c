@@ -4,8 +4,8 @@
 / refer to https://opensource.org/licenses/BSD-2-Clause
 /------------------------------------------------------*/
 
-#define PICO_SPDIF_RX_PIO 1
-#define PICO_SPDIF_RX_DMA_IRQ 1
+#define PICO_SPDIF_RX_PIO 0
+#define PICO_SPDIF_RX_DMA_IRQ 0
 
 #include <stdio.h>
 #include "spdif_rx.h"
@@ -17,9 +17,8 @@
 #include "hardware/irq.h"
 #include "spdif_rx.pio.h"
 
-#define BUF_SIZE (1024*8)
+#define BUF_SIZE (1024*2)
 static uint32_t buff[2][BUF_SIZE];
-static int buffId = 0;
 uint8_t prevOut;
 uint32_t syncSymCount = 0;
 uint32_t dataCount = 0;
@@ -48,23 +47,15 @@ static struct {
 // irq handler for DMA
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     uint dma_channel = shared_state.dma_channel;
-    if (dma_intsx & (1u << dma_channel)) {
+    if ((dma_intsx & (1u << dma_channel))) {
         dma_intsx = 1u << dma_channel;
         DEBUG_PINS_SET(spdif_rx_timing, 4);
-        int nextBufId = 1 - buffId;
-        dma_channel_transfer_to_buffer_now(dma_channel, buff[nextBufId], BUF_SIZE);
-        spdif_rx_check(buff[buffId]);
-        buffId = nextBufId;
-        /*
-        // free the buffer we just finished
-        if (shared_state.playing_buffer) {
-            //give_audio_buffer(audio_i2s_consumer, shared_state.playing_buffer);
-#ifndef NDEBUG
-            shared_state.playing_buffer = NULL;
-#endif
-        }
-        audio_start_dma_transfer();
-        */
+        spdif_rx_check(buff[0]);
+        DEBUG_PINS_CLR(spdif_rx_timing, 4);
+    } else if ((dma_intsx & (1u << (dma_channel+1)))) {
+        dma_intsx = 1u << (dma_channel + 1);
+        DEBUG_PINS_SET(spdif_rx_timing, 4);
+        spdif_rx_check(buff[1]);
         DEBUG_PINS_CLR(spdif_rx_timing, 4);
     }
 }
@@ -91,28 +82,49 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     __mem_fence_release();
     uint8_t dma_channel = config->dma_channel;
     dma_channel_claim(dma_channel);
+    dma_channel_claim(dma_channel+1);
     shared_state.dma_channel = dma_channel;
 
-    dma_channel_config dma_config = dma_channel_get_default_config(dma_channel);
-    channel_config_set_transfer_data_size(&dma_config, DMA_SIZE_32);
-    channel_config_set_read_increment(&dma_config, false);
-    channel_config_set_write_increment(&dma_config, true);
-    channel_config_set_dreq(&dma_config, DREQ_PIOx_RX0 + sm);
-
-    irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
-    dma_channel_set_irqx_enabled(dma_channel, 1);
-    irq_set_enabled(DMA_IRQ_x, 1);
+    dma_channel_config dma_config0 = dma_channel_get_default_config(dma_channel);
+    channel_config_set_transfer_data_size(&dma_config0, DMA_SIZE_32);
+    channel_config_set_read_increment(&dma_config0, false);
+    channel_config_set_write_increment(&dma_config0, true);
+    channel_config_set_dreq(&dma_config0, DREQ_PIOx_RX0 + sm);
+    channel_config_set_chain_to(&dma_config0, dma_channel+1);
+    channel_config_set_enable(&dma_config0, true);
 
     dma_channel_configure(
         dma_channel,
-        &dma_config,
-        NULL, // dest
+        &dma_config0,
+        buff[0], // dest
         &spdif_rx_pio->rxf[sm],  // src
-        0, // count
+        BUF_SIZE, // count
         false // trigger
     );
 
-    dma_channel_transfer_to_buffer_now(dma_channel, buff[buffId], BUF_SIZE);
+    dma_channel_config dma_config1 = dma_channel_get_default_config(dma_channel+1);
+    channel_config_set_transfer_data_size(&dma_config1, DMA_SIZE_32);
+    channel_config_set_read_increment(&dma_config1, false);
+    channel_config_set_write_increment(&dma_config1, true);
+    channel_config_set_dreq(&dma_config1, DREQ_PIOx_RX0 + sm);
+    channel_config_set_chain_to(&dma_config1, dma_channel);
+    channel_config_set_enable(&dma_config1, true);
+
+    dma_channel_configure(
+        dma_channel+1,
+        &dma_config1,
+        buff[1], // dest
+        &spdif_rx_pio->rxf[sm],  // src
+        BUF_SIZE, // count
+        false // trigger
+    );
+
+    irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
+    dma_channel_set_irqx_enabled(dma_channel, 1);
+    //dma_channel_set_irqx_enabled(dma_channel+1, 1);
+    irq_set_enabled(DMA_IRQ_x, 1);
+
+    dma_channel_start(dma_channel);
     spdif_rx_program_init(spdif_rx_pio, sm, loaded_offset, config->data_pin);
 }
 
@@ -158,7 +170,7 @@ void spdif_rx_check(uint32_t buffer[])
                 default:
                     syncSymCount = 0;
                     dataCount = 0;
-                    printf("FATAL ERR\n");
+                    //printf("FATAL ERR\n");
                     break;
             }
             prevOut = out;
