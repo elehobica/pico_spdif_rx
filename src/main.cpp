@@ -65,8 +65,6 @@ int main()
     // Set PLL_USB 96MHz and use it for PIO clock for I2S
     pw_set_pll_usb_96MHz();
 
-    printf("step 1\r\n");
-
     // DCDC PSM control
     // 0: PFM mode (best efficiency)
     // 1: PWM mode (improved ripple)
@@ -74,29 +72,19 @@ int main()
     gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
     gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWM mode for less Audio noise
 
-    printf("step 2\r\n");
-
     spdif_rx_config_t config = {
         .data_pin = PIN_PICO_SPDIF_RX_DATA,
-        .dma_channel = 1,
-        .pio_sm = 1
+        .pio_sm = 0,
+        .dma_channel = 0
     };
-    printf("step 3\r\n");
     spdif_rx_setup(&config);
-
-    printf("step 4\r\n");
 
     uint32_t prev = _millis();
     // Echo characters received from PIO to the console
     while (true) {
-        spdif_rx_loop();
-        //tight_loop_contents();
+        //spdif_rx_loop();
+        tight_loop_contents();
     }
-    /*
-    while (true) {
-        sleep_ms(10);
-    }
-    */
 
     return 0;
 }

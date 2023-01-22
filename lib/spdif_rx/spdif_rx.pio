@@ -107,7 +107,7 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin
     pio_sm_exec(pio, sm, pio_encode_pull(false, false));
     pio_sm_exec(pio, sm, pio_encode_out(pio_y, 32));
     pio_sm_put_blocking(pio, sm, 0x0f);
-    pio_sm_exec(pio, sm, pio_encode_pull(false, false)); // only this to store to osr
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false)); // only pull to store to osr
     pio_sm_set_enabled(pio, sm, true);
 
     // fifo join needs to be done after pull/out

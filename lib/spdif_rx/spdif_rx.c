@@ -4,8 +4,8 @@
 / refer to https://opensource.org/licenses/BSD-2-Clause
 /------------------------------------------------------*/
 
-#define PICO_SPDIF_RX_DMA_IRQ 1
 #define PICO_SPDIF_RX_PIO 1
+#define PICO_SPDIF_RX_DMA_IRQ 1
 
 #include <stdio.h>
 #include "spdif_rx.h"
@@ -17,9 +17,9 @@
 #include "hardware/irq.h"
 #include "spdif_rx.pio.h"
 
-#define BUF_SIZE 1024*32
-static uint32_t buff[BUF_SIZE];
-uint32_t* ptr = buff;
+#define BUF_SIZE 1024
+static uint32_t buff[2][BUF_SIZE];
+static int buffId = 0;
 uint8_t prevOut;
 uint32_t syncSymCount = 0;
 uint32_t dataCount = 0;
@@ -27,7 +27,9 @@ uint32_t totalCount = 0;
 uint32_t errorCount = 0;
 uint32_t frameCount = 0;
 uint32_t blockCount = 0;
+bool detectedSync = false;
 
+// ---- select at most one ---
 CU_REGISTER_DEBUG_PINS(spdif_rx_timing)
 
 #define spdif_rx_pio __CONCAT(pio, PICO_SPDIF_RX_PIO)
@@ -45,14 +47,14 @@ static struct {
 
 // irq handler for DMA
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
-#if PICO_AUDIO_I2S_NOOP
-    assert(false);
-#else
     uint dma_channel = shared_state.dma_channel;
     if (dma_intsx & (1u << dma_channel)) {
         dma_intsx = 1u << dma_channel;
         DEBUG_PINS_SET(spdif_rx_timing, 4);
-        printf("spdif_rx_timing");
+        int nextBufId = 1 - buffId;
+        dma_channel_transfer_to_buffer_now(dma_channel, buff[nextBufId], BUF_SIZE);
+        spdif_rx_check(buff[buffId]);
+        buffId = nextBufId;
         /*
         // free the buffer we just finished
         if (shared_state.playing_buffer) {
@@ -65,7 +67,6 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         */
         DEBUG_PINS_CLR(spdif_rx_timing, 4);
     }
-#endif
 }
 
 void spdif_rx_end()
@@ -86,19 +87,23 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     pio_sm_claim(spdif_rx_pio, sm);
     pio_sm_set_clkdiv(spdif_rx_pio, shared_state.pio_sm, 1);
     loaded_offset = pio_add_program(spdif_rx_pio, &spdif_rx_program);
-    spdif_rx_program_init(spdif_rx_pio, sm, loaded_offset, config->data_pin);
 
-
-    /*
     __mem_fence_release();
     uint8_t dma_channel = config->dma_channel;
     dma_channel_claim(dma_channel);
     shared_state.dma_channel = dma_channel;
 
     dma_channel_config dma_config = dma_channel_get_default_config(dma_channel);
-    channel_config_set_dreq(&dma_config, DREQ_PIOx_RX0 + sm);
-    enum dma_channel_transfer_size spdif_rx_dma_configure_size = DMA_SIZE_32;
-    channel_config_set_transfer_data_size(&dma_config, spdif_rx_dma_configure_size);
+    channel_config_set_transfer_data_size(&dma_config, DMA_SIZE_32);
+    channel_config_set_read_increment(&dma_config, false);
+    channel_config_set_write_increment(&dma_config, true);
+    //channel_config_set_dreq(&dma_config, DREQ_PIOx_RX0 + sm);
+    channel_config_set_dreq(&dma_config, pio_get_dreq(spdif_rx_pio, sm, false));
+
+    irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
+    dma_channel_set_irqx_enabled(dma_channel, 1);
+    irq_set_enabled(DMA_IRQ_x, 1);
+
     dma_channel_configure(
         dma_channel,
         &dma_config,
@@ -108,63 +113,56 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
         false // trigger
     );
 
-    irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
-    dma_channel_set_irqx_enabled(dma_channel, 1);
-
-    dma_channel_transfer_to_buffer_now(dma_channel, &buff, 1024);
-    */
+    dma_channel_transfer_to_buffer_now(dma_channel, buff[buffId], BUF_SIZE);
+    spdif_rx_program_init(spdif_rx_pio, sm, loaded_offset, config->data_pin);
 }
 
-void spdif_rx_loop()
+void spdif_rx_check(uint32_t buffer[])
 {
-    if (ptr - buff < BUF_SIZE) {
-        *ptr++ = spdif_rx_program_get32(spdif_rx_pio, shared_state.pio_sm);
-    } else {
-        printf("done\n");
-        for (int i = 0; i < BUF_SIZE; i++) {
-            for (int j = 0; j < 16; j++) {
-                uint8_t out = (buff[i] >> (30 - j*2)) & 0x3;
-                switch (out) {
-                    case 0x0:
-                        printf("0");
-                        syncSymCount = 0;
-                        dataCount++;
-                        break;
-                    case 0x1:
-                        printf("1");
-                        syncSymCount = 0;
-                        dataCount++;
-                        break;
-                    case 0x3:
-                        if (prevOut == 0x3) {
-                            printf("s");
-                            syncSymCount++;
-                            dataCount = 0;
-                        } else {
-                            printf("\ns");
-                            if (dataCount != 28 && dataCount != 30) {
-                                errorCount++;
-                            } else if (dataCount == 28) {
-                                blockCount++;
-                                frameCount++;
-                            } else {
-                                frameCount++;
-                            }
-                            syncSymCount = 1;
-                        }
-                        break;
-                    default:
-                        syncSymCount = 0;
+    for (int i = 0; i < BUF_SIZE; i++) {
+        for (int j = 0; j < 16; j++) {
+            uint8_t out = (buffer[i] >> (30 - j*2)) & 0x3;
+            switch (out) {
+                case 0x0:
+                    //printf("0");
+                    syncSymCount = 0;
+                    dataCount++;
+                    break;
+                case 0x1:
+                    //printf("1");
+                    syncSymCount = 0;
+                    dataCount++;
+                    break;
+                case 0x3:
+                    if (prevOut == 0x3) {
+                        //printf("s");
+                        syncSymCount++;
                         dataCount = 0;
-                        printf("FATAL ERR\n");
-                        break;
-                }
-                prevOut = out;
-                totalCount++;
+                    } else {
+                        //printf("\ns");
+                        if (dataCount != 28 && dataCount != 30) {
+                            if (detectedSync) {
+                                errorCount++;
+                            }
+                        } else if (dataCount == 28) {
+                            blockCount++;
+                            frameCount++;
+                        } else {
+                            frameCount++;
+                        }
+                        detectedSync = true;
+                        syncSymCount = 1;
+                    }
+                    break;
+                default:
+                    syncSymCount = 0;
+                    dataCount = 0;
+                    printf("FATAL ERR\n");
+                    break;
             }
+            prevOut = out;
+            totalCount++;
         }
-        printf("\n");
-        printf("errorCount = %d, frameCount = %d, blockCount = %d\n", errorCount, frameCount, blockCount);
-        while (true) {}
     }
+    printf("errorCount = %d, frameCount = %d, blockCount = %d\n", errorCount, frameCount, blockCount);
 }
