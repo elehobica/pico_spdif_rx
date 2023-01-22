@@ -45,42 +45,43 @@
 ;   0b11110100 : Sync Code W (sync E4) (syncE + bit1 + bit0)
 
 .program spdif_rx
+.define lp 10 ; Latch Point - 1(0 ~ 17)
 
 public entry_point:
     wait 0 pin 0
 
 .wrap_target
 wait_1:                    ; comment                       :  start sym pos    end sym pos
-    wait 1 pin 0 [16+8]    ; wait for 0 -> 1               :  0                1 + 8/17
+    wait 1 pin 0 [16+lp]   ; wait for 0 -> 1               :  0                1 + lp/17
 symbol_1x:
-    jmp pin symbol_11x     ; If symbol 11 -> go symbol_11x :  1 + 8/17         1 + 9/17
-    in y, 2                ; else emit 1 (symbol 10)       :  1 + 9/17         1 + 10/17
-    jmp wait_1             ; go wait_1                     :  1 + 10/17        1 + 11/17
+    jmp pin symbol_11x     ; If symbol 11 -> go symbol_11x :  1 + lp/17        1 + (lp+1)/17
+    in y, 2                ; else emit 1 (symbol 10)       :  1 + (lp+1)/17    1 + (lp+2)/17
+    jmp wait_1             ; go wait_1                     :  1 + (lp+2)/17    1 + (lp+3)/17
 symbol_11x:
-    nop [15]               ;                               :  1 + 9/17         2 + 8/17
-    jmp pin sync1110       ; If symbol 111 -> go sync1110  :  2 + 8/17         2 + 9/17
-    in x, 2                ; else emit 0 (symbol 110)      :  2 + 9/17         2 + 10/17
-    jmp symbol_0x [14]     ; go symbol_0x                  :  2 + 10/17        3 + 8/17 (= 1 + 8/17)
+    nop [15]               ;                               :  1 + (lp+1)/17    2 + lp/17
+    jmp pin sync1110       ; If symbol 111 -> go sync1110  :  2 + lp/17        2 + (lp+1)/17
+    in x, 2                ; else emit 0 (symbol 110)      :  2 + (lp+1)/17    2 + (lp+2)/17
+    jmp symbol_0x [14]     ; go symbol_0x                  :  2 + (lp+2)/17    3 + lp/17 (= 1 + lp/17)
 
 wait_0:
-    wait 0 pin 0 [16+8]    ; wait for 1 -> 0               :  0                1 + 8/17
+    wait 0 pin 0 [16+lp]   ; wait for 1 -> 0               :  0                1 + lp/17
 symbol_0x:
-    jmp pin symbol_01      ; If symbol 01 -> go symbol_01  :  1 + 8/17         1 + 9/17
-    in x, 2                ; else emit 0 (symbol 00)       :  1 + 9/17         1 + 10/17
+    jmp pin symbol_01      ; If symbol 01 -> go symbol_01  :  1 + lp/17        1 + (lp+1)/17
+    in x, 2                ; else emit 0 (symbol 00)       :  1 + (lp+1)/17    1 + (lp+2)/17
 .wrap
 symbol_01:
-    in y, 2                ; emit 1                        :  1 + 9/17         1 + 10/17
-    jmp wait_0             ; go wait_0                     :  1 + 10/17        1 + 11/17
+    in y, 2                ; emit 1                        :  1 + (lp+1)/17    1 + (lp+2)/17
+    jmp wait_0             ; go wait_0                     :  1 + (lp+2)/17    1 + (lp+3)/17
 
 sync1110:
-    in osr, 4              ; emit sync (sync 1110)         :  2 + 9/17         2 + 10/17
-    wait 0 pin 0 [16+8]    ; wait for 1 -> 0               :  3                4 + 8/17
-    jmp pin sync1xxx [15]  ; If sync 1xxx -> go sync1xxx   :  4 + 8/17         5 + 7/17
-    jmp symbol_0x          ; else go symbol_0x (sync 0xxx) :  5 + 7/17         5 + 8/17 (= 1 + 8/17)
+    in osr, 4              ; emit sync (sync 1110)         :  2 + (lp+1)/17    2 + (lp+2)/17
+    wait 0 pin 0 [16+lp]   ; wait for 1 -> 0               :  3                4 + lp/17
+    jmp pin sync1xxx [15]  ; If sync 1xxx -> go sync1xxx   :  4 + lp/17        5 + (lp-1)/17
+    jmp symbol_0x          ; else go symbol_0x (sync 0xxx) :  5 + (lp-1)/17    5 + lp/17 (= 1 + lp/17)
 
 sync1xxx:                  ; sync1xxx must be sync1000 (no check)
-    in osr, 4              ; emit sync (sync 1000)         :  5 + 7/17         5 + 8/17
-    jmp entry_point        ;                               :  5 + 8/17         5 + 9/17
+    in osr, 4              ; emit sync (sync 1000)         :  5 + (lp-1)/17    5 + lp/17
+    jmp entry_point        ;                               :  5 + lp/17        5 + (lp+1)/17
 
 % c-sdk {
 

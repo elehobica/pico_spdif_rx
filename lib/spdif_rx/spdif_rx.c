@@ -17,7 +17,7 @@
 #include "hardware/irq.h"
 #include "spdif_rx.pio.h"
 
-#define BUF_SIZE 1024
+#define BUF_SIZE (1024*8)
 static uint32_t buff[2][BUF_SIZE];
 static int buffId = 0;
 uint8_t prevOut;
@@ -97,8 +97,7 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     channel_config_set_transfer_data_size(&dma_config, DMA_SIZE_32);
     channel_config_set_read_increment(&dma_config, false);
     channel_config_set_write_increment(&dma_config, true);
-    //channel_config_set_dreq(&dma_config, DREQ_PIOx_RX0 + sm);
-    channel_config_set_dreq(&dma_config, pio_get_dreq(spdif_rx_pio, sm, false));
+    channel_config_set_dreq(&dma_config, DREQ_PIOx_RX0 + sm);
 
     irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
     dma_channel_set_irqx_enabled(dma_channel, 1);
@@ -119,6 +118,7 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
 
 void spdif_rx_check(uint32_t buffer[])
 {
+    int errIndex = 0;
     for (int i = 0; i < BUF_SIZE; i++) {
         for (int j = 0; j < 16; j++) {
             uint8_t out = (buffer[i] >> (30 - j*2)) & 0x3;
@@ -142,6 +142,7 @@ void spdif_rx_check(uint32_t buffer[])
                         //printf("\ns");
                         if (dataCount != 28 && dataCount != 30) {
                             if (detectedSync) {
+                                errIndex = i;
                                 errorCount++;
                             }
                         } else if (dataCount == 28) {
@@ -164,5 +165,5 @@ void spdif_rx_check(uint32_t buffer[])
             totalCount++;
         }
     }
-    printf("errorCount = %d, frameCount = %d, blockCount = %d\n", errorCount, frameCount, blockCount);
+    printf("errorCount = %d, frameCount = %d, blockCount = %d errIndex = %d\n", errorCount, frameCount, blockCount, errIndex);
 }
