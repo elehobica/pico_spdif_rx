@@ -49,6 +49,7 @@
 public entry_point:
     wait 0 pin 0
 
+.wrap_target
 wait_1:                    ; comment                       :  start sym pos    end sym pos
     wait 1 pin 0 [16+8]    ; wait for 0 -> 1               :  0                1 + 8/17
 symbol_1x:
@@ -61,16 +62,15 @@ symbol_11x:
     in x, 2                ; else emit 0 (symbol 110)      :  2 + 9/17         2 + 10/17
     jmp symbol_0x [14]     ; go symbol_0x                  :  2 + 10/17        3 + 8/17 (= 1 + 8/17)
 
-.wrap_target
 wait_0:
     wait 0 pin 0 [16+8]    ; wait for 1 -> 0               :  0                1 + 8/17
 symbol_0x:
     jmp pin symbol_01      ; If symbol 01 -> go symbol_01  :  1 + 8/17         1 + 9/17
     in x, 2                ; else emit 0 (symbol 00)       :  1 + 9/17         1 + 10/17
-    jmp wait_1             ; go wait_1                     :  1 + 10/17        1 + 11/17
+.wrap
 symbol_01:
     in y, 2                ; emit 1                        :  1 + 9/17         1 + 10/17
-.wrap
+    jmp wait_0             ; go wait_0                     :  1 + 10/17        1 + 11/17
 
 sync1110:
     in osr, 4              ; emit sync (sync 1110)         :  2 + 9/17         2 + 10/17
