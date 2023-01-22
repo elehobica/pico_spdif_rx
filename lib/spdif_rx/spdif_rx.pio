@@ -1,0 +1,128 @@
+; Copyright (c) 2023, Elehobica
+; Released under the BSD-2-Clause
+; refer to https://opensource.org/licenses/BSD-2-Clause
+
+; === SPDIF Specification ===
+; [Bit] (1 bit = 2 symbols)
+; BMC (Bitphase Mark Code)
+;          prev   bit0   bit1
+; symbol   X 0    1 1    1 0
+; symbol   X 1    0 0    0 1
+; 
+; [Sync] not encoded in BMC (Sync Code = 8 symbols)
+; Sync Code B: symbol 1 1 1 0 1 0 0 0 (0xE8)
+; Sync Code M: symbol 1 1 1 0 0 0 1 0 (0xE2)
+; Sync Code W: symbol 1 1 1 0 0 1 0 0 (0xE4)
+;  (inverted code 0x17, 0x1D, 0x1B will not appear unless error)
+;
+; [SPDIF Sub Frame Format] (64 symbols)
+; 16bit Audio Format
+; Sync (8) + AUX (8) + '0' (8) + 16bit Audio (32) + VUCP (8)
+; 24bit Audio Format
+; Sync (8) + 24bit Audio (48) + VUCP (8)
+;
+; [SPDIF Frame Format] (2 Sub Frames)
+; B(L) + W(R) : head block
+; M(L) + W(R) : succeeding blocks
+
+; [SPDIF Block Format] (192 Frames = 384 Sub Frames)
+; B(L0) + W(R0) + M(L1) + W(R1) + M(L2) + W(R2) + .... + M(L191) + W(R191)
+
+; === spdif_rx PIO program Specification ===
+; pio frequency: 96 MHz (sys_clk)
+; supported input sampling frequency: 44.1 MHz
+; -> symbol clock: 5.6448 MHz (128fs) (17 cycles of sys_clk)
+; pio output bit rate: 5.6448 Mbps (No bit loss regardless of the diff between input 44.1KHz and rp2040's 44.1KHz)
+
+; pio outputs
+;  0b00  : bit0 (symbol_00 or symbol_11)
+;  0b01  : bit1 (symbol_10 or symbol_01)
+;  0b1111: syncE (symbol_1110) or sync8 (symbol_1000)  (can't distinguish)
+;
+;   thus Sync Code will consist of as follows
+;   0b11111111 : Sync Code B (sync E8) (syncE + sync8)
+;   0b11110001 : Sync Code M (sync E2) (syncE + bit0 + bit1)
+;   0b11110100 : Sync Code W (sync E4) (syncE + bit1 + bit0)
+
+.program spdif_rx
+
+public entry_point:
+    wait 0 pin 0
+
+wait_1:                    ; comment                       :  start sym pos    end sym pos
+    wait 1 pin 0 [16+8]    ; wait for 0 -> 1               :  0                1 + 8/17
+symbol_1x:
+    jmp pin symbol_11x     ; If symbol 11 -> go symbol_11x :  1 + 8/17         1 + 9/17
+    in y, 2                ; else emit 1 (symbol 10)       :  1 + 9/17         1 + 10/17
+    jmp wait_1             ; go wait_1                     :  1 + 10/17        1 + 11/17
+symbol_11x:
+    nop [15]               ;                               :  1 + 9/17         2 + 8/17
+    jmp pin sync1110       ; If symbol 111 -> go sync1110  :  2 + 8/17         2 + 9/17
+    in x, 2                ; else emit 0 (symbol 110)      :  2 + 9/17         2 + 10/17
+    jmp symbol_0x [14]     ; go symbol_0x                  :  2 + 10/17        3 + 8/17 (= 1 + 8/17)
+
+.wrap_target
+wait_0:
+    wait 0 pin 0 [16+8]    ; wait for 1 -> 0               :  0                1 + 8/17
+symbol_0x:
+    jmp pin symbol_01      ; If symbol 01 -> go symbol_01  :  1 + 8/17         1 + 9/17
+    in x, 2                ; else emit 0 (symbol 00)       :  1 + 9/17         1 + 10/17
+    jmp wait_1             ; go wait_1                     :  1 + 10/17        1 + 11/17
+symbol_01:
+    in y, 2                ; emit 1                        :  1 + 9/17         1 + 10/17
+.wrap
+
+sync1110:
+    in osr, 4              ; emit sync (sync 1110)         :  2 + 9/17         2 + 10/17
+    wait 0 pin 0 [16+8]    ; wait for 1 -> 0               :  3                4 + 8/17
+    jmp pin sync1xxx [15]  ; If sync 1xxx -> go sync1xxx   :  4 + 8/17         5 + 7/17
+    jmp symbol_0x          ; else go symbol_0x (sync 0xxx) :  5 + 7/17         5 + 8/17 (= 1 + 8/17)
+
+sync1xxx:                  ; sync1xxx must be sync1000 (no check)
+    in osr, 4              ; emit sync (sync 1000)         :  5 + 7/17         5 + 8/17
+    jmp entry_point        ;                               :  5 + 8/17         5 + 9/17
+
+% c-sdk {
+
+static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+    pio_gpio_init(pio, pin);
+    gpio_pull_down(pin);
+
+    pio_sm_config sm_config = spdif_rx_program_get_default_config(offset);
+
+    sm_config_set_jmp_pin(&sm_config, pin);
+    sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
+    sm_config_set_in_shift(&sm_config, false, true, 32); // shift_left, autopush, 32bit
+
+    pio_sm_init(pio, sm, offset, &sm_config);
+    pio_sm_set_pins(pio, sm, 0); // clear pins
+
+    // set x, y, OSR (use as config value)
+    pio_sm_set_enabled(pio, sm, false);
+    pio_sm_put_blocking(pio, sm, 0x00);
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false));
+    pio_sm_exec(pio, sm, pio_encode_out(pio_x, 32));
+    pio_sm_put_blocking(pio, sm, 0x01);
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false));
+    pio_sm_exec(pio, sm, pio_encode_out(pio_y, 32));
+    pio_sm_put_blocking(pio, sm, 0x0f);
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false)); // only this to store to osr
+    pio_sm_set_enabled(pio, sm, true);
+
+    // fifo join needs to be done after pull/out
+    sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
+
+    pio_sm_exec(pio, sm, pio_encode_jmp(offset + spdif_rx_offset_entry_point));
+}
+
+static inline uint32_t spdif_rx_program_get32(PIO pio, uint sm) {
+    // 32-bit read from the FIFO, as data is right-justified
+    io_rw_32 *rxfifo_shift = (io_rw_32*)&pio->rxf[sm];
+    while (pio_sm_is_rx_fifo_empty(pio, sm)) {
+        tight_loop_contents();
+    }
+    return (uint32_t)*rxfifo_shift;
+}
+
+%}
