@@ -19,7 +19,7 @@
 #include "spdif_rx.pio.h"
 
 #define TRANSFER_COUNTS (512)
-#define BUF_SIZE (1024)
+#define BUF_SIZE (128)
 uint32_t buff[BUF_SIZE];
 dma_channel_config dma_config0;
 dma_channel_config dma_config1;

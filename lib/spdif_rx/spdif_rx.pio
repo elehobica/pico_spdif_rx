@@ -44,6 +44,7 @@
 ;   0b11110001 : Sync Code M (sync E2) (syncE + bit0 + bit1)
 ;   0b11110100 : Sync Code W (sync E4) (syncE + bit1 + bit0)
 
+; ==============================================================================================
 .program spdif_rx
 .define lp 10 ; Latch Point - 1(0 ~ 17)
 
@@ -83,6 +84,7 @@ sync1xxx:                  ; sync1xxx must be sync1000 (no check)
     in osr, 4              ; emit sync (sync 1000)         :  5 + (lp-1)/17    5 + lp/17
     jmp entry_point        ;                               :  5 + lp/17        5 + (lp+1)/17
 
+; ==============================================================================================
 .program spdif_rx_post
 public entry_point:
 
@@ -97,10 +99,10 @@ find_sync_B:                       ; find 2nd half of sync B (11 -> 11)
     out x, 2                       ; load 2 bits
     jmp x!=y find_sync_M
     out x, 2                       ; load 2 bits
-    jmp x!=y find_code_1111
+    jmp x!=y find_code_1111a
     jmp frame_start
 find_sync_M:                       ; find 2nd half of sync M (00 -> 01)
-    jmp !x find_code_1111
+    jmp x-- find_code_1111a
     set y, 0b01
     out x, 2                       ; load 2 bits
     jmp x!=y find_code_1111
@@ -134,6 +136,7 @@ l_to_r_loop:
     jmp x-- l_to_r_loop
     jmp sub_frame_loop             ; (2 loops repeat)
 
+; ==============================================================================================
 % c-sdk {
 
 static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin) {
