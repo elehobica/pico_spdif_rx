@@ -18,11 +18,12 @@
 #include "hardware/irq.h"
 #include "spdif_rx.pio.h"
 
-#define NUM_BUF_SIZE_BITS (10)
-#define BUF_SIZE (1 << (NUM_BUF_SIZE_BITS - 2))
-//static uint32_t buff[2][BUF_SIZE];
+#define TRANSFER_COUNTS (512)
+#define BUF_SIZE (1024)
+uint32_t buff[BUF_SIZE];
 dma_channel_config dma_config0;
 dma_channel_config dma_config1;
+dma_channel_config dma_config2;
 uint8_t prevOut;
 uint32_t syncSymCount = 0;
 uint32_t dataCount = 0;
@@ -38,6 +39,7 @@ CU_REGISTER_DEBUG_PINS(spdif_rx_timing)
 #define spdif_rx_pio0 __CONCAT(pio, PICO_SPDIF_RX_PIO0)
 #define spdif_rx_pio1 __CONCAT(pio, PICO_SPDIF_RX_PIO1)
 #define DREQ_PIOx_RX0 __CONCAT(__CONCAT(DREQ_PIO, PICO_SPDIF_RX_PIO0), _RX0)
+#define DREQ_PIOx_RX1 __CONCAT(__CONCAT(DREQ_PIO, PICO_SPDIF_RX_PIO1), _RX0)
 
 #define dma_intsx __CONCAT(dma_hw->ints, PICO_SPDIF_RX_DMA_IRQ)
 #define dma_channel_set_irqx_enabled __CONCAT(__CONCAT(dma_channel_set_irq, PICO_SPDIF_RX_DMA_IRQ),_enabled)
@@ -47,13 +49,16 @@ static uint loaded_offset0 = 0;
 static uint loaded_offset1 = 0;
 spdif_rx_config_t shared_state;
 
-static int count0 = 0;
-static int count1 = 0;
+static inline uint32_t _millis(void)
+{
+	return to_ms_since_boot(get_absolute_time());
+}
 
 // irq handler for DMA
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     uint dma_channel0 = shared_state.dma_channel0;
     uint dma_channel1 = shared_state.dma_channel1;
+    uint dma_channel2 = shared_state.dma_channel2;
     uint8_t sm0 = shared_state.pio_sm0;
     uint8_t sm1 = shared_state.pio_sm1;
 
@@ -65,12 +70,11 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             &dma_config0,
             &spdif_rx_pio1->txf[sm1],  // dest
             &spdif_rx_pio0->rxf[sm0],  // src
-            BUF_SIZE, // count
+            TRANSFER_COUNTS, // count
             false // trigger
         );
-        count0++;
         //printf("0");
-        //spdif_rx_check(buff[0]);
+        //printf("1 %d\n", _millis());
         DEBUG_PINS_CLR(spdif_rx_timing, 4);
     }
     if ((dma_intsx & (1u << dma_channel1))) {
@@ -81,13 +85,17 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             &dma_config1,
             &spdif_rx_pio1->txf[sm1],  // dest
             &spdif_rx_pio0->rxf[sm0],  // src
-            BUF_SIZE, // count
+            TRANSFER_COUNTS, // count
             false // trigger
         );
-        count1++;
         //printf("1");
-        //spdif_rx_check(buff[1]);
         DEBUG_PINS_CLR(spdif_rx_timing, 4);
+    }
+    if ((dma_intsx & (1u << dma_channel2))) {
+        dma_intsx = 1u << dma_channel2;
+        //printf("2");
+        printf("2 %d\n", _millis());
+        dma_channel_transfer_to_buffer_now(dma_channel2, buff, BUF_SIZE);
     }
 }
 
@@ -103,11 +111,14 @@ void spdif_rx_end()
     pio_clear_instruction_memory(spdif_rx_pio1);
     uint8_t dma_channel0 = shared_state.dma_channel0;
     uint8_t dma_channel1 = shared_state.dma_channel1;
+    uint8_t dma_channel2 = shared_state.dma_channel2;
     dma_channel_unclaim(dma_channel0);
     dma_channel_unclaim(dma_channel1);
+    dma_channel_unclaim(dma_channel2);
     irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
     dma_channel_set_irqx_enabled(dma_channel0, 0);
     dma_channel_set_irqx_enabled(dma_channel1, 0);
+    dma_channel_set_irqx_enabled(dma_channel2, 0);
 }
 
 void spdif_rx_setup(const spdif_rx_config_t *config)
@@ -124,10 +135,13 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     __mem_fence_release();
     uint8_t dma_channel0 = config->dma_channel0;
     uint8_t dma_channel1 = config->dma_channel1;
+    uint8_t dma_channel2 = config->dma_channel2;
     dma_channel_claim(dma_channel0);
     dma_channel_claim(dma_channel1);
+    dma_channel_claim(dma_channel2);
     shared_state.dma_channel0 = dma_channel0;
     shared_state.dma_channel1 = dma_channel1;
+    shared_state.dma_channel2 = dma_channel2;
 
     dma_config0 = dma_channel_get_default_config(dma_channel0);
     channel_config_set_transfer_data_size(&dma_config0, DMA_SIZE_32);
@@ -141,7 +155,7 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
         &dma_config0,
         &spdif_rx_pio1->txf[sm1],  // dest
         &spdif_rx_pio0->rxf[sm0],  // src
-        BUF_SIZE, // count
+        TRANSFER_COUNTS, // count
         false // trigger
     );
 
@@ -157,6 +171,21 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
         &dma_config1,
         &spdif_rx_pio1->txf[sm1],  // dest
         &spdif_rx_pio0->rxf[sm0],  // src
+        TRANSFER_COUNTS, // count
+        false // trigger
+    );
+
+    dma_config2 = dma_channel_get_default_config(dma_channel2);
+    channel_config_set_transfer_data_size(&dma_config2, DMA_SIZE_32);
+    channel_config_set_read_increment(&dma_config2, false);
+    channel_config_set_write_increment(&dma_config2, true);
+    channel_config_set_dreq(&dma_config2, DREQ_PIOx_RX1 + sm1);
+
+    dma_channel_configure(
+        dma_channel2,
+        &dma_config2,
+        buff,
+        &spdif_rx_pio1->rxf[sm1],  // src
         BUF_SIZE, // count
         false // trigger
     );
@@ -165,69 +194,31 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     //irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, 0xff); // highest
     dma_channel_set_irqx_enabled(dma_channel0, 1);
     dma_channel_set_irqx_enabled(dma_channel1, 1);
+    dma_channel_set_irqx_enabled(dma_channel2, 1);
     irq_set_enabled(DMA_IRQ_x, 1);
 
+    dma_channel_transfer_to_buffer_now(dma_channel2, buff, BUF_SIZE);
+    //dma_channel_start(dma_channel2);
     dma_channel_start(dma_channel0);
     spdif_rx_post_program_init(spdif_rx_pio1, sm1, loaded_offset1);
     spdif_rx_program_init(spdif_rx_pio0, sm0, loaded_offset0, config->data_pin);
+    printf("2 %d\n", _millis());
 }
 
-void spdif_rx_loop()
+#define CHK_BUF_SIZE (44100 * 1)
+uint32_t data[CHK_BUF_SIZE];
+void spdif_rx_check()
 {
-    uint32_t data = spdif_rx_program_get32(spdif_rx_pio1, shared_state.pio_sm1);
-    printf("L = %04x, R = %04x\n", (data >> 16), data & 0xffff);
-}
-
-void spdif_rx_check(uint32_t buffer[])
-{
-    int errIndex = 0;
-    for (int i = 0; i < BUF_SIZE*2; i++) {
-        uint32_t data = buffer[i];
-        for (int j = 0; j < 16; j++) {
-            uint8_t out = data & 0x3;
-            data = data >> 2;
-            switch (out) {
-                case 0x0:
-                    //printf("0");
-                    syncSymCount = 0;
-                    dataCount++;
-                    break;
-                case 0x1:
-                    //printf("1");
-                    syncSymCount = 0;
-                    dataCount++;
-                    break;
-                case 0x3:
-                    if (prevOut == 0x3) {
-                        //printf("s");
-                        syncSymCount++;
-                        dataCount = 0;
-                    } else {
-                        //printf("\ns");
-                        if (dataCount != 28 && dataCount != 30) {
-                            if (detectedSync) {
-                                errIndex = i;
-                                errorCount++;
-                            }
-                        } else if (dataCount == 28) {
-                            blockCount++;
-                            frameCount++;
-                        } else {
-                            frameCount++;
-                        }
-                        detectedSync = true;
-                        syncSymCount = 1;
-                    }
-                    break;
-                default:
-                    syncSymCount = 0;
-                    dataCount = 0;
-                    //printf("FATAL ERR\n");
-                    break;
-            }
-            prevOut = out;
-            totalCount++;
-        }
+    /*
+    for (int i = 0; i < CHK_BUF_SIZE; i++) {
+        data[i] = spdif_rx_program_get32(spdif_rx_pio1, shared_state.pio_sm1);
     }
-    printf("errorCount = %d, frameCount = %d, blockCount = %d errIndex = %d\n", errorCount, frameCount, blockCount, errIndex);
+    printf("done\n");
+    */
+    /*
+    for (int i = 0; i < CHK_BUF_SIZE; i++) {
+        printf("L = %04x, R = %04x\n", (data[i] >> 16), data[i] & 0xffff);
+    }
+    */
+    while (true) {}
 }

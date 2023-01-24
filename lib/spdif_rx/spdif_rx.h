@@ -42,12 +42,12 @@ typedef struct spdif_rx_config {
     uint8_t pio_sm1;
     uint8_t dma_channel0;
     uint8_t dma_channel1;
+    uint8_t dma_channel2;
 } spdif_rx_config_t;
 
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();
-void spdif_rx_loop();
-void spdif_rx_check(uint32_t buffer[]);
+void spdif_rx_check();
 
 #ifdef __cplusplus
 }
