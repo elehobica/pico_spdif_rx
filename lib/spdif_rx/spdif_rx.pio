@@ -83,6 +83,57 @@ sync1xxx:                  ; sync1xxx must be sync1000 (no check)
     in osr, 4              ; emit sync (sync 1000)         :  5 + (lp-1)/17    5 + lp/17
     jmp entry_point        ;                               :  5 + lp/17        5 + (lp+1)/17
 
+.program spdif_rx_post
+public entry_point:
+
+find_code_1111:                    ; find 1st half of sync B/M/W (11 -> 11)
+    set y, 0b11
+find_code_1111a:
+    out x, 2                       ; load 2 bits
+    jmp x!=y find_code_1111a
+    out x, 2                       ; load 2 bits
+    jmp x!=y find_code_1111a
+find_sync_B:                       ; find 2nd half of sync B (11 -> 11)
+    out x, 2                       ; load 2 bits
+    jmp x!=y find_sync_M
+    out x, 2                       ; load 2 bits
+    jmp x!=y find_code_1111
+    jmp frame_start
+find_sync_M:                       ; find 2nd half of sync M (00 -> 01)
+    jmp !x find_code_1111
+    set y, 0b01
+    out x, 2                       ; load 2 bits
+    jmp x!=y find_code_1111
+
+frame_start:
+skip_aux0:                         ; skip AUX and '0'
+    set x, 7
+skip_aux0_loop:
+    out null, 2
+    jmp x-- skip_aux0_loop
+two_sub_frames:
+    set y, 1                       ; 2 loops for L and R sub frames = frame
+sub_frame_loop:
+    set x, 15                      ; 16 loops for audio data 16 bits
+audio_data_loop:
+    in osr, 1                      ; sample 1 bit of 00 or 01 (for this, auto pull shift must be right direction)
+    out null, 2
+    jmp x-- audio_data_loop        ; (16 loops repeat)
+skip_vucp:                         ; skip VUCP
+    set x, 3
+skip_vucp_loop:
+    out null, 2
+    jmp x-- skip_vucp_loop
+
+    jmp y-- l_to_r
+    jmp find_code_1111             ; (2 loops end)
+l_to_r:
+    set x, 11
+l_to_r_loop:
+    out null, 2                    ; skip Sync, AUX and '0'
+    jmp x-- l_to_r_loop
+    jmp sub_frame_loop             ; (2 loops repeat)
+
 % c-sdk {
 
 static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin) {
@@ -94,7 +145,7 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin
 
     sm_config_set_jmp_pin(&sm_config, pin);
     sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
-    sm_config_set_in_shift(&sm_config, false, true, 32); // shift_left, autopush, 32bit
+    sm_config_set_in_shift(&sm_config, true, true, 32); // shift_right, autopush, 32bit
 
     pio_sm_init(pio, sm, offset, &sm_config);
     pio_sm_set_pins(pio, sm, 0); // clear pins
@@ -115,6 +166,18 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin
     sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
 
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + spdif_rx_offset_entry_point));
+}
+
+static inline void spdif_rx_post_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config sm_config = spdif_rx_program_get_default_config(offset);
+
+    sm_config_set_out_shift(&sm_config, true, true, 32); // shift_right, autopull, 32bit
+    sm_config_set_in_shift(&sm_config, false, true, 32); // shift_left, autopush, 32bit
+
+    pio_sm_init(pio, sm, offset, &sm_config);
+    pio_sm_set_enabled(pio, sm, true);
+
+    pio_sm_exec(pio, sm, pio_encode_jmp(offset + spdif_rx_post_offset_entry_point));
 }
 
 static inline uint32_t spdif_rx_program_get32(PIO pio, uint sm) {

@@ -16,26 +16,37 @@ extern "C" {
 #define PICO_SPDIF_RX_DMA_IRQ 0
 #endif
 
-#ifndef PICO_SPDIF_RX_PIO
-#define PICO_SPDIF_RX_PIO 0
+#ifndef PICO_SPDIF_RX_PIO0
+#define PICO_SPDIF_RX_PIO0 0
+#endif
+
+#ifndef PICO_SPDIF_RX_PIO1
+#define PICO_SPDIF_RX_PIO1 1
 #endif
 
 #if !(PICO_SPDIF_RX_DMA_IRQ == 0 || PICO_SPDIF_RX_DMA_IRQ == 1)
 #error PICO_SPDIF_RX_DMA_IRQ must be 0 or 1
 #endif
 
-#if !(PICO_SPDIF_RX_PIO == 0 || PICO_SPDIF_RX_PIO == 1)
-#error PICO_SPDIF_RX_PIO ust be 0 or 1
+#if !(PICO_SPDIF_RX_PIO0 == 0 || PICO_SPDIF_RX_PIO0 == 1)
+#error PICO_SPDIF_RX_PIO0 ust be 0 or 1
+#endif
+
+#if !(PICO_SPDIF_RX_PIO0 == 1 || PICO_SPDIF_RX_PIO1 == 1)
+#error PICO_SPDIF_RX_PIO1 ust be 0 or 1
 #endif
 
 typedef struct spdif_rx_config {
     uint8_t data_pin;
-    uint8_t pio_sm;
-    uint8_t dma_channel;
+    uint8_t pio_sm0;
+    uint8_t pio_sm1;
+    uint8_t dma_channel0;
+    uint8_t dma_channel1;
 } spdif_rx_config_t;
 
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();
+void spdif_rx_loop();
 void spdif_rx_check(uint32_t buffer[]);
 
 #ifdef __cplusplus

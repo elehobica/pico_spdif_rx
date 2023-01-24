@@ -13,19 +13,14 @@
 ## How to build
 * See ["Getting started with Raspberry Pi Pico"](https://datasheets.raspberrypi.org/pico/getting-started-with-pico.pdf)
 * Build is confirmed only in Developer Command Prompt for VS 2019 and Visual Studio Code on Windows enviroment
-* Put "pico-sdk", "pico-examples", "pico-extras" and "pico-playground" on the same level with this project folder.
+* Put "pico-sdk", "pico-examples" (, "pico-extras" and "pico-playground") on the same level with this project folder.
+* Confirmed under Pico SDK 1.4.0
 ```
 > git clone -b master https://github.com/raspberrypi/pico-sdk.git
 > cd pico-sdk
 > git submodule update -i
 > cd ..
 > git clone -b master https://github.com/raspberrypi/pico-examples.git
-> 
-> git clone https://github.com/raspberrypi/pico-extras.git
-> cd pico-extras
-> git submodule update -i
-> cd ..
-> git clone https://github.com/raspberrypi/pico-playground.git
 > 
 > git clone -b main https://github.com/elehobica/pico_spdif_rx.git
 ```

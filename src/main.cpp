@@ -20,12 +20,6 @@
 static constexpr uint8_t PIN_DCDC_PSM_CTRL = 23;
 static constexpr uint8_t PIN_PICO_SPDIF_RX_DATA = 15;
 
-uint32_t step0 = 0x200000;
-uint32_t step1 = 0x200000;
-uint32_t pos0 = 0;
-uint32_t pos1 = 0;
-uint vol = 20;
-
 static inline uint32_t _millis(void)
 {
 	return to_ms_since_boot(get_absolute_time());
@@ -74,16 +68,19 @@ int main()
 
     spdif_rx_config_t config = {
         .data_pin = PIN_PICO_SPDIF_RX_DATA,
-        .pio_sm = 0,
-        .dma_channel = 0
+        .pio_sm0 = 0,
+        .pio_sm1 = 1,
+        .dma_channel0 = 0,
+        .dma_channel1 = 1
     };
     spdif_rx_setup(&config);
+    printf("setup done\n");
 
-    uint32_t prev = _millis();
-    // Echo characters received from PIO to the console
     while (true) {
-        //spdif_rx_loop();
+        // Echo characters received from PIO to the console
+        spdif_rx_loop();
         tight_loop_contents();
+        //sleep_ms(1000);
     }
 
     return 0;
