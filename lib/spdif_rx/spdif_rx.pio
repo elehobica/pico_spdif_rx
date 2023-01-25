@@ -34,19 +34,29 @@
 ; -> symbol clock: 5.6448 MHz (128fs) (17 cycles of sys_clk)
 ; pio output bit rate: 5.6448 Mbps (No bit loss regardless of the diff between input 44.1KHz and rp2040's 44.1KHz)
 
-; pio outputs
-;  0b00  : bit0 (symbol_00 or symbol_11)
-;  0b01  : bit1 (symbol_10 or symbol_01)
-;  0b1111: syncE (symbol_1110) or sync8 (symbol_1000)  (can't distinguish)
+; pio outputs (bit order is opposite to SPDIF format)
+;
+; 16bit Audio Format
+; PCUV (4) + 16bit Audio (16) + '0' (4) + AUX (4) + Sync (4)
+; 24bit Audio Format
+; PCUV (4) + 24bit Audio (24) + Sync (4)
+;
+;  0b0  : bit0 (symbol_00 or symbol_11)
+;  0b1  : bit1 (symbol_10 or symbol_01)
+;  0b11 : syncE (symbol_1110) or sync8 (symbol_1000)  (can't distinguish)
 ;
 ;   thus Sync Code will consist of as follows
-;   0b11111111 : Sync Code B (sync E8) (syncE + sync8)
-;   0b11110001 : Sync Code M (sync E2) (syncE + bit0 + bit1)
-;   0b11110100 : Sync Code W (sync E4) (syncE + bit1 + bit0)
+;   0b1111 : Sync Code B (sync E8) (syncE -> sync8)
+;   0b1011 : Sync Code M (sync E2) (syncE -> bit0 -> bit1)
+;   0b0111 : Sync Code W (sync E4) (syncE -> bit1 -> bit0)
 
 ; ==============================================================================================
 .program spdif_rx
 .define lp 10 ; Latch Point - 1(0 ~ 17)
+
+; assumption of register value
+;   y  : 0x00000000
+;   osr: 0xffffffff
 
 public entry_point:
     wait 0 pin 0
@@ -56,85 +66,34 @@ wait_1:                    ; comment                       :  start sym pos    e
     wait 1 pin 0 [16+lp]   ; wait for 0 -> 1               :  0                1 + lp/17
 symbol_1x:
     jmp pin symbol_11x     ; If symbol 11 -> go symbol_11x :  1 + lp/17        1 + (lp+1)/17
-    in y, 2                ; else emit 1 (symbol 10)       :  1 + (lp+1)/17    1 + (lp+2)/17
+    in osr, 1              ; else emit 1 (symbol 10)       :  1 + (lp+1)/17    1 + (lp+2)/17
     jmp wait_1             ; go wait_1                     :  1 + (lp+2)/17    1 + (lp+3)/17
 symbol_11x:
     nop [15]               ;                               :  1 + (lp+1)/17    2 + lp/17
     jmp pin sync1110       ; If symbol 111 -> go sync1110  :  2 + lp/17        2 + (lp+1)/17
-    in x, 2                ; else emit 0 (symbol 110)      :  2 + (lp+1)/17    2 + (lp+2)/17
+    in y, 1                ; else emit 0 (symbol 110)      :  2 + (lp+1)/17    2 + (lp+2)/17
     jmp symbol_0x [14]     ; go symbol_0x                  :  2 + (lp+2)/17    3 + lp/17 (= 1 + lp/17)
 
 wait_0:
     wait 0 pin 0 [16+lp]   ; wait for 1 -> 0               :  0                1 + lp/17
 symbol_0x:
     jmp pin symbol_01      ; If symbol 01 -> go symbol_01  :  1 + lp/17        1 + (lp+1)/17
-    in x, 2                ; else emit 0 (symbol 00)       :  1 + (lp+1)/17    1 + (lp+2)/17
+    in y, 1                ; else emit 0 (symbol 00)       :  1 + (lp+1)/17    1 + (lp+2)/17
 .wrap
 symbol_01:
-    in y, 2                ; emit 1                        :  1 + (lp+1)/17    1 + (lp+2)/17
+    in osr, 1              ; emit 1                        :  1 + (lp+1)/17    1 + (lp+2)/17
     jmp wait_0             ; go wait_0                     :  1 + (lp+2)/17    1 + (lp+3)/17
 
 sync1110:
-    in osr, 4              ; emit sync (sync 1110)         :  2 + (lp+1)/17    2 + (lp+2)/17
+    push block             ; this is 32bit start
+    in osr, 2              ; emit sync (sync 1110)         :  2 + (lp+1)/17    2 + (lp+2)/17
     wait 0 pin 0 [16+lp]   ; wait for 1 -> 0               :  3                4 + lp/17
     jmp pin sync1xxx [15]  ; If sync 1xxx -> go sync1xxx   :  4 + lp/17        5 + (lp-1)/17
     jmp symbol_0x          ; else go symbol_0x (sync 0xxx) :  5 + (lp-1)/17    5 + lp/17 (= 1 + lp/17)
 
 sync1xxx:                  ; sync1xxx must be sync1000 (no check)
-    in osr, 4              ; emit sync (sync 1000)         :  5 + (lp-1)/17    5 + lp/17
+    in osr, 2              ; emit sync (sync 1000)         :  5 + (lp-1)/17    5 + lp/17
     jmp entry_point        ;                               :  5 + lp/17        5 + (lp+1)/17
-
-; ==============================================================================================
-.program spdif_rx_post
-public entry_point:
-
-find_code_1111:                    ; find 1st half of sync B/M/W (11 -> 11)
-    set y, 0b11
-find_code_1111a:
-    out x, 2                       ; load 2 bits
-    jmp x!=y find_code_1111a
-    out x, 2                       ; load 2 bits
-    jmp x!=y find_code_1111a
-find_sync_B:                       ; find 2nd half of sync B (11 -> 11)
-    out x, 2                       ; load 2 bits
-    jmp x!=y find_sync_M
-    out x, 2                       ; load 2 bits
-    jmp x!=y find_code_1111a
-    jmp frame_start
-find_sync_M:                       ; find 2nd half of sync M (00 -> 01)
-    jmp x-- find_code_1111a
-    set y, 0b01
-    out x, 2                       ; load 2 bits
-    jmp x!=y find_code_1111
-
-frame_start:
-skip_aux0:                         ; skip AUX and '0'
-    set x, 7
-skip_aux0_loop:
-    out null, 2
-    jmp x-- skip_aux0_loop
-two_sub_frames:
-    set y, 1                       ; 2 loops for L and R sub frames = frame
-sub_frame_loop:
-    set x, 15                      ; 16 loops for audio data 16 bits
-audio_data_loop:
-    in osr, 1                      ; sample 1 bit of 00 or 01 (for this, auto pull shift must be right direction)
-    out null, 2
-    jmp x-- audio_data_loop        ; (16 loops repeat)
-skip_vucp:                         ; skip VUCP
-    set x, 3
-skip_vucp_loop:
-    out null, 2
-    jmp x-- skip_vucp_loop
-
-    jmp y-- l_to_r
-    jmp find_code_1111             ; (2 loops end)
-l_to_r:
-    set x, 11
-l_to_r_loop:
-    out null, 2                    ; skip Sync, AUX and '0'
-    jmp x-- l_to_r_loop
-    jmp sub_frame_loop             ; (2 loops repeat)
 
 ; ==============================================================================================
 % c-sdk {
@@ -148,7 +107,7 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin
 
     sm_config_set_jmp_pin(&sm_config, pin);
     sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
-    sm_config_set_in_shift(&sm_config, true, true, 32); // shift_right, autopush, 32bit
+    sm_config_set_in_shift(&sm_config, true, false, 32); // shift_right, no autopush, 32bit
 
     pio_sm_init(pio, sm, offset, &sm_config);
     pio_sm_set_pins(pio, sm, 0); // clear pins
@@ -156,9 +115,6 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin
     // set x, y, OSR (use as config value)
     pio_sm_set_enabled(pio, sm, false);
     pio_sm_put_blocking(pio, sm, 0x00);
-    pio_sm_exec(pio, sm, pio_encode_pull(false, false));
-    pio_sm_exec(pio, sm, pio_encode_out(pio_x, 32));
-    pio_sm_put_blocking(pio, sm, 0x01);
     pio_sm_exec(pio, sm, pio_encode_pull(false, false));
     pio_sm_exec(pio, sm, pio_encode_out(pio_y, 32));
     pio_sm_put_blocking(pio, sm, 0x0f);
@@ -169,18 +125,6 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin
     sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
 
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + spdif_rx_offset_entry_point));
-}
-
-static inline void spdif_rx_post_program_init(PIO pio, uint sm, uint offset) {
-    pio_sm_config sm_config = spdif_rx_program_get_default_config(offset);
-
-    sm_config_set_out_shift(&sm_config, true, true, 32); // shift_right, autopull, 32bit
-    sm_config_set_in_shift(&sm_config, false, true, 32); // shift_left, autopush, 32bit
-
-    pio_sm_init(pio, sm, offset, &sm_config);
-    pio_sm_set_enabled(pio, sm, true);
-
-    pio_sm_exec(pio, sm, pio_encode_jmp(offset + spdif_rx_post_offset_entry_point));
 }
 
 static inline uint32_t spdif_rx_program_get32(PIO pio, uint sm) {

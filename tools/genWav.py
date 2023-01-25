@@ -19,17 +19,9 @@ def main(filename):
         if m := re.search(r'L \= ([\da-f]{4}), R \= ([\da-f]{4})', line, re.IGNORECASE):
             left = int(m.group(1), 16)
             right = int(m.group(2), 16)
-            #print(f'{left = :#06x} {right = :#06x}')
-            #print(f'{left = :016b} {right = :016b}')
-            left = reverse_mask(left) >> 16
-            right = reverse_mask(right) >> 16
-            #print(f'{left = :#06x} {right = :#06x}')
-            #print(f'{left = :016b} {right = :016b}')
-            left -= 32768
-            right -= 32768
             data.append(left)
             data.append(right)
-    bin = struct.pack('h' * len(data), *data)
+    bin = struct.pack('H' * len(data), *data)
 
     print(len(data))
 

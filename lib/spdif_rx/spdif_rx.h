@@ -38,11 +38,9 @@ extern "C" {
 
 typedef struct spdif_rx_config {
     uint8_t data_pin;
-    uint8_t pio_sm0;
-    uint8_t pio_sm1;
+    uint8_t pio_sm;
     uint8_t dma_channel0;
     uint8_t dma_channel1;
-    uint8_t dma_channel2;
 } spdif_rx_config_t;
 
 void spdif_rx_setup(const spdif_rx_config_t *config);

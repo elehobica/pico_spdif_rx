@@ -68,18 +68,16 @@ int main()
 
     spdif_rx_config_t config = {
         .data_pin = PIN_PICO_SPDIF_RX_DATA,
-        .pio_sm0 = 0,
-        .pio_sm1 = 1,
+        .pio_sm = 0,
         .dma_channel0 = 0,
-        .dma_channel1 = 1,
-        .dma_channel2 = 2
+        .dma_channel1 = 1
     };
     spdif_rx_setup(&config);
     printf("setup done\n");
 
     while (true) {
         // Echo characters received from PIO to the console
-        spdif_rx_check();
+        //spdif_rx_check();
         tight_loop_contents();
         //sleep_ms(1000);
     }
