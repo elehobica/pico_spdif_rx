@@ -52,48 +52,54 @@
 
 ; ==============================================================================================
 .program spdif_rx
-.define lp 10 ; Latch Point - 1(0 ~ 17)
+; it's desirable symbol cycle should meet with sampling frequency of input source
+;  at least between 2+1 cycles, then it should keep good latching position of the symbol.
+;  (because 'wait' intruction can cancel the delay)
+.define cy 17     ; symbol cycle
+.define lp cy/2+1 ; symbol latch point (0 ~ cy-1)
 
-; assumption of register value
+; assuming y, osr registers are configured as below
 ;   y  : 0x00000000
-;   osr: 0xffffffff
+;   osr: 0x00000003
 
 public entry_point:
     wait 0 pin 0
 
 .wrap_target
-wait_1:                    ; comment                       :  start sym pos    end sym pos
-    wait 1 pin 0 [16+lp]   ; wait for 0 -> 1               :  0                1 + lp/17
+;                          ; comment                       :  start sym pos   end sym pos
+;                                                             (*) symbol latch with delay
+wait_1:
+    wait 1 pin 0 [cy-1+lp] ; wait for 0 -> 1               :  0                1 + lp/cy
 symbol_1x:
-    jmp pin symbol_11x     ; If symbol 11 -> go symbol_11x :  1 + lp/17        1 + (lp+1)/17
-    in osr, 1              ; else emit 1 (symbol 10)       :  1 + (lp+1)/17    1 + (lp+2)/17
-    jmp wait_1             ; go wait_1                     :  1 + (lp+2)/17    1 + (lp+3)/17
+    jmp pin symbol_11x     ; If symbol 11 -> go symbol_11x :  1 + lp/cy (*)    1 + (lp+1)/cy
+    in osr, 1              ; else emit 1 (symbol 10)       :  1 + (lp+1)/cy    1 + (lp+2)/cy
+    jmp wait_1             ; go wait_1                     :  1 + (lp+2)/cy    1 + (lp+3)/cy
 symbol_11x:
-    nop [15]               ;                               :  1 + (lp+1)/17    2 + lp/17
-    jmp pin sync1110       ; If symbol 111 -> go sync1110  :  2 + lp/17        2 + (lp+1)/17
-    in y, 1                ; else emit 0 (symbol 110)      :  2 + (lp+1)/17    2 + (lp+2)/17
-    jmp symbol_0x [14]     ; go symbol_0x                  :  2 + (lp+2)/17    3 + lp/17 (= 1 + lp/17)
+    nop [cy-2]             ;                               :  1 + (lp+1)/cy    2 + lp/cy
+    jmp pin sync1110       ; If symbol 111 -> go sync1110  :  2 + lp/cy (*)    2 + (lp+1)/cy (maximum delayed latch point)
+    in y, 1                ; else emit 0 (symbol 110)      :  2 + (lp+1)/cy    2 + (lp+2)/cy
+    jmp symbol_0x [cy-3]   ; go symbol_0x                  :  2 + (lp+2)/cy    3 + lp/cy (= 1 + lp/cy)
 
 wait_0:
-    wait 0 pin 0 [16+lp]   ; wait for 1 -> 0               :  0                1 + lp/17
+    wait 0 pin 0 [cy-1+lp] ; wait for 1 -> 0               :  0                1 + lp/cy
 symbol_0x:
-    jmp pin symbol_01      ; If symbol 01 -> go symbol_01  :  1 + lp/17        1 + (lp+1)/17
-    in y, 1                ; else emit 0 (symbol 00)       :  1 + (lp+1)/17    1 + (lp+2)/17
+    jmp pin symbol_01      ; If symbol 01 -> go symbol_01  :  1 + lp/cy (*)    1 + (lp+1)/cy
+    in y, 1                ; else emit 0 (symbol 00)       :  1 + (lp+1)/cy    1 + (lp+2)/cy
 .wrap
 symbol_01:
-    in osr, 1              ; emit 1                        :  1 + (lp+1)/17    1 + (lp+2)/17
-    jmp wait_0             ; go wait_0                     :  1 + (lp+2)/17    1 + (lp+3)/17
+    in osr, 1              ; emit 1                        :  1 + (lp+1)/cy    1 + (lp+2)/cy
+    jmp wait_0             ; go wait_0                     :  1 + (lp+2)/cy    1 + (lp+3)/cy
 
 sync1110:
     push block             ; this is 32bit start
-    in osr, 2              ; emit sync (sync 1110)         :  2 + (lp+1)/17    2 + (lp+2)/17
-    wait 0 pin 0 [16+lp]   ; wait for 1 -> 0               :  3                4 + lp/17
-    jmp pin sync1xxx [15]  ; If sync 1xxx -> go sync1xxx   :  4 + lp/17        5 + (lp-1)/17
-    jmp symbol_0x          ; else go symbol_0x (sync 0xxx) :  5 + (lp-1)/17    5 + lp/17 (= 1 + lp/17)
+    in osr, 2              ; emit sync (sync 1110)         :  2 + (lp+1)/cy    2 + (lp+2)/cy
+    wait 0 pin 0 [cy-1+lp] ; wait for 1 -> 0               :  0                1 + lp/cy
+    jmp pin sync1xxx [cy-2]; If sync 1xxx -> go sync1xxx   :  1 + lp/cy (*)    2 + (lp-1)/cy
+    jmp symbol_0x          ; else go symbol_0x (sync 0xxx) :  2 + (lp-1)/cy    2 + lp/cy (= 1 + lp/cy)
 
 sync1xxx:                  ; sync1xxx must be sync1000 (no check)
-    in osr, 2              ; emit sync (sync 1000)         :  5 + (lp-1)/17    5 + lp/17
-    jmp entry_point        ;                               :  5 + lp/17        5 + (lp+1)/17
+    in osr, 2              ; emit sync (sync 1000)         :  2 + (lp-1)/cy    2 + lp/cy
+    jmp entry_point        ;                               :  2 + lp/cy        2 + (lp+1)/cy
 
 ; ==============================================================================================
 % c-sdk {
@@ -112,12 +118,12 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin
     pio_sm_init(pio, sm, offset, &sm_config);
     pio_sm_set_pins(pio, sm, 0); // clear pins
 
-    // set x, y, OSR (use as config value)
+    // set y, OSR (use as config value)
     pio_sm_set_enabled(pio, sm, false);
-    pio_sm_put_blocking(pio, sm, 0x00);
+    pio_sm_put_blocking(pio, sm, 0x0); // y = 0x0
     pio_sm_exec(pio, sm, pio_encode_pull(false, false));
     pio_sm_exec(pio, sm, pio_encode_out(pio_y, 32));
-    pio_sm_put_blocking(pio, sm, 0x0f);
+    pio_sm_put_blocking(pio, sm, 0x3); // osr = 0x3
     pio_sm_exec(pio, sm, pio_encode_pull(false, false)); // only pull to store to osr
     pio_sm_set_enabled(pio, sm, true);
 
