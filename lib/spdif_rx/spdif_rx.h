@@ -46,6 +46,7 @@ typedef struct spdif_rx_config {
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();
 void spdif_rx_check();
+void spdif_rx_status();
 
 #ifdef __cplusplus
 }

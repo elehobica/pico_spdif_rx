@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <math.h>
+#include <cinttypes>
 
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
@@ -77,9 +78,9 @@ int main()
 
     while (true) {
         // Echo characters received from PIO to the console
-        //spdif_rx_check();
+        spdif_rx_status();
         tight_loop_contents();
-        //sleep_ms(1000);
+        sleep_ms(1000);
     }
 
     return 0;

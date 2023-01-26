@@ -17,7 +17,7 @@
 #include "hardware/irq.h"
 #include "spdif_rx.pio.h"
 
-#define BUF_SIZE (44100/2)
+#define BUF_SIZE (384)
 uint32_t buff[2][BUF_SIZE];
 dma_channel_config dma_config0;
 dma_channel_config dma_config1;
@@ -44,9 +44,46 @@ CU_REGISTER_DEBUG_PINS(spdif_rx_timing)
 static uint loaded_offset = 0;
 spdif_rx_config_t shared_state;
 
+static int count = 0;
+static uint64_t prevTime = 0;
+static uint64_t interval[10];
+static float aveInterval;
+static int prevPosSyncB = 0;
+static bool syncOk = false;
+#define SYNC_B 0b1111
+#define SYNC_M 0b1011
+#define SYNC_W 0b0111
+
+static inline uint64_t _micros(void)
+{
+	return to_us_since_boot(get_absolute_time());
+}
+
 static inline uint32_t _millis(void)
 {
 	return to_ms_since_boot(get_absolute_time());
+}
+
+bool syncCheck(uint32_t b[BUF_SIZE])
+{
+    for (int i = 0; i < BUF_SIZE; i++) {
+        uint32_t sync = b[i] & 0xf;
+        if (sync == SYNC_B) {
+            if (syncOk) {
+                if (prevPosSyncB != i) {
+                    syncOk = false;
+                    break;
+                }
+            } else {
+                syncOk = true;
+                prevPosSyncB = i;
+            }
+        } else if (syncOk && ((i % 2 == prevPosSyncB % 2 && sync != SYNC_M) || (i % 2 != prevPosSyncB % 2 && sync != SYNC_W))) {
+            syncOk = false;
+            break;
+        }
+    }
+    return syncOk;
 }
 
 // irq handler for DMA
@@ -54,6 +91,14 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     uint dma_channel0 = shared_state.dma_channel0;
     uint dma_channel1 = shared_state.dma_channel1;
     uint8_t sm = shared_state.pio_sm;
+    uint64_t now = _micros();
+    interval[count % 10] = now - prevTime;
+    uint64_t accum = 0;
+    for (int i = 0; i < 10; i++) {
+        accum += interval[i];
+    }
+    aveInterval = (float) accum / 10;
+    count++;
 
     if ((dma_intsx & (1u << dma_channel0))) {
         dma_intsx = 1u << dma_channel0;
@@ -66,14 +111,13 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             BUF_SIZE, // count
             false // trigger
         );
+        syncCheck(buff[0]);
         //printf("0");
-        //printf("1 %d\n", _millis());
         DEBUG_PINS_CLR(spdif_rx_timing, 4);
     }
     if ((dma_intsx & (1u << dma_channel1))) {
         dma_intsx = 1u << dma_channel1;
         DEBUG_PINS_SET(spdif_rx_timing, 4);
-        spdif_rx_check();
         dma_channel_configure(
             dma_channel1,
             &dma_config1,
@@ -82,9 +126,11 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             BUF_SIZE, // count
             false // trigger
         );
+        syncCheck(buff[1]);
         //printf("1");
         DEBUG_PINS_CLR(spdif_rx_timing, 4);
     }
+    prevTime = now;
 }
 
 void spdif_rx_end()
@@ -138,7 +184,7 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     channel_config_set_read_increment(&dma_config1, false);
     channel_config_set_write_increment(&dma_config1, true);
     channel_config_set_dreq(&dma_config1, DREQ_PIOx_RX0 + sm);
-    //channel_config_set_chain_to(&dma_config1, dma_channel0);
+    channel_config_set_chain_to(&dma_config1, dma_channel0);
 
     dma_channel_configure(
         dma_channel1,
@@ -157,21 +203,21 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
 
     dma_channel_start(dma_channel0);
     spdif_rx_program_init(spdif_rx_pio, sm, loaded_offset, config->data_pin);
-    printf("2 %d\n", _millis());
 }
 
+void spdif_rx_status()
+{
+    if (syncOk) {
+        float bitrate = (float) BUF_SIZE * 2 * 8 * 1e6 / aveInterval;
+        //printf("bitrate = %7.4f Kbps interval = %7.4f\n", bitrate / 1e3, aveInterval);
+        printf("Samp Freq = %7.4f KHz\n", bitrate  / 1e3 / 32.0);
+    } else {
+        printf("stable sync not detected\n");
+    }
+}
 
-/*
-#define DATA_SIZE (44100)
-uint32_t data[DATA_SIZE];
-*/
 void spdif_rx_check()
 {
-    /*
-    for (int i = 0; i < DATA_SIZE; i++) {
-        data[i] = spdif_rx_program_get32(spdif_rx_pio, shared_state.pio_sm);
-    }
-    */
     printf("done\n");
     uint32_t* data = buff[0];
     for (int i = 0; i < BUF_SIZE; i++) {
