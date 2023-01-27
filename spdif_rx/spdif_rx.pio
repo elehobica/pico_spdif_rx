@@ -55,8 +55,8 @@
 ; it's desirable symbol cycle should meet with sampling frequency of input source
 ;  at least between 2+1 cycles, then it should keep good latching position of the symbol.
 ;  (because 'wait' intruction can cancel the accumulated timing error)
-.define cy 17     ; symbol cycle
-.define lp cy/2+1 ; symbol latch point (0 ~ cy-1)
+.define cy 21     ; symbol cycle for 44.1 KHz
+.define lp cy/2   ; symbol latch point (0 ~ cy-1)
 
 ; assuming y, osr registers are configured as below
 ;   y  : 0x00000000
