@@ -11,12 +11,12 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-add_subdirectory(lib/my_pico_stdio_usb)
-add_subdirectory(lib/spdif_rx)
+add_subdirectory(spdif_rx)
+add_subdirectory(samples/lib/my_pico_stdio_usb)
 
 set(bin_name "pico_spdif_rx")
 add_executable(${bin_name}
-    src/main.cpp
+    samples/detect_samp_freq/main.cpp
 )
 
 #pico_enable_stdio_usb(${bin_name} 1)
