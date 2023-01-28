@@ -106,6 +106,7 @@ int main()
             printf("Samp Freq = %7.4f KHz\n", samp_freq  / 1e3);
         } else {
             printf("stable sync not detected\n");
+            spdif_rx_search_next();
         }
         tight_loop_contents();
         sleep_ms(1000);

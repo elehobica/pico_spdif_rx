@@ -54,7 +54,7 @@
 ; it's desirable symbol cycle should meet with sampling frequency of input source
 ;  at least between 2+1 cycles, then it should keep good latching position of the symbol.
 ;  (because 'wait' intruction can cancel the accumulated timing error)
-.define cy 21     ; symbol cycle for 44.1 KHz
+.define cy 21     ; symbol cycle for both 44.1 KHz and 48 KHz(for reference, cy = 22.14 for 44.1 KHz, cy = 20.34 for 48 KHz)
 .define lp cy/2   ; symbol latch point (0 ~ cy-1)
 
 ; assuming y, osr registers are configured as below
@@ -108,7 +108,7 @@ sync1xxx:                  ; sync1xxx must be sync1000
 ; it's desirable symbol cycle should meet with sampling frequency of input source
 ;  at least between 2+1 cycles, then it should keep good latching position of the symbol.
 ;  (because 'wait' intruction can cancel the accumulated timing error)
-.define cy 21     ; symbol cycle for 44.1 KHz
+.define cy 21     ; symbol cycle for both 44.1 KHz and 48 KHz(for reference, cy = 22.14 for 44.1 KHz, cy = 20.34 for 48 KHz)
 .define lp cy/2   ; symbol latch point (0 ~ cy-1)
 
 ; assuming y, osr registers are configured as below
@@ -160,12 +160,12 @@ symbol_01:
 ; ==============================================================================================
 % c-sdk {
 
-static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin) {
+static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint entry_point, pio_sm_config (*get_default_config)(uint), uint pin) {
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);
     gpio_pull_down(pin);
 
-    pio_sm_config sm_config = spdif_rx_program_get_default_config(offset);
+    pio_sm_config sm_config = get_default_config(offset);
 
     sm_config_set_jmp_pin(&sm_config, pin);
     sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
@@ -186,7 +186,7 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint pin
     // fifo join needs to be done after pull/out
     sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
 
-    pio_sm_exec(pio, sm, pio_encode_jmp(offset + spdif_rx_offset_entry_point));
+    pio_sm_exec(pio, sm, pio_encode_jmp(offset + entry_point));
 }
 
 static inline uint32_t spdif_rx_program_get32(PIO pio, uint sm) {
