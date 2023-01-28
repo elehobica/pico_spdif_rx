@@ -104,6 +104,8 @@ int main()
         if (spdif_rx_status()) {
             uint32_t samp_freq = spdif_rx_get_samp_freq();
             printf("Samp Freq = %7.4f KHz\n", samp_freq  / 1e3);
+            printf("c_bits = %032b\n", spdif_rx_get_c_bits());
+            printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
         } else {
             printf("stable sync not detected\n");
             spdif_rx_search_next();

@@ -30,7 +30,11 @@ dma_channel_config dma_config1;
 #define dma_channel_set_irqx_enabled __CONCAT(__CONCAT(dma_channel_set_irq, PICO_SPDIF_RX_DMA_IRQ),_enabled)
 #define DMA_IRQ_x __CONCAT(DMA_IRQ_, PICO_SPDIF_RX_DMA_IRQ)
 
-static uint loaded_offset = 0;
+#define SYNC_B 0b1111
+#define SYNC_M 0b1011
+#define SYNC_W 0b0111
+
+static spdif_rx_config_t gcfg;
 
 typedef struct {
     const pio_program_t *program;
@@ -46,18 +50,33 @@ static spdif_rx_pio_program_t decode_sets[] = {
 
 static int program_id = 0;
 
-static spdif_rx_config_t gcfg;
-
 static int block_count = 0;
 static int prev_block_count = 0;
 static uint64_t prev_time = 0;
 static uint64_t block_interval[10];
 static float ave_block_interval;
 static int  prev_pos_syncB = 0;
-static int sync_ok = 0;
-#define SYNC_B 0b1111
-#define SYNC_M 0b1011
-#define SYNC_W 0b0111
+static bool sync_ok = false;
+static uint32_t c_bits;
+static uint32_t parity_err_count = 0;
+
+const char count_ones8[256] =
+	"\x00\x01\x01\x02\x01\x02\x02\x03\x01\x02\x02\x03\x02\x03\x03\x04"
+	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
+	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
+	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
+	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
+	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
+	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
+	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
+	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
+	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
+	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
+	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
+	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
+	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
+	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
+	"\x04\x05\x05\x06\x05\x06\x06\x07\x05\x06\x06\x07\x06\x07\x07\x08";
 
 static inline uint64_t _micros(void)
 {
@@ -91,25 +110,39 @@ static void _spdif_rx_direct_check()
     while (true) {}
 }
 
-static int _syncCheck(uint32_t b[BUF_SIZE])
+static bool _syncCheck(uint32_t b[BUF_SIZE])
 {
     for (int i = 0; i < BUF_SIZE; i++) {
         uint32_t sync = b[i] & 0xf;
         if (sync == SYNC_B) {
             if (sync_ok) {
                 if (prev_pos_syncB != i) {
-                    sync_ok = 0;
+                    sync_ok = false;
                     break;
                 }
             } else {
-                sync_ok = 1;
+                sync_ok = true;
                 prev_pos_syncB = i;
             }
-        //} else if (sync_ok && ((i % 2 == prev_pos_syncB % 2 && sync != SYNC_M) || (i % 2 != prev_pos_syncB % 2 && sync != SYNC_W))) {
         } else if (sync_ok) {
             if ((i % 2 == prev_pos_syncB % 2 && sync != SYNC_M) || (i % 2 != prev_pos_syncB % 2 && sync != SYNC_W)) {
                 sync_ok = false;
                 break;
+            }
+            // VUCP handling
+            // C bits (heading 32bit only)
+            int j = (i + BUF_SIZE - prev_pos_syncB) % BUF_SIZE;
+            if (j % 2 == 0 && j >= 0 && j < 64) {
+                uint32_t c_bit = ((b[i] & (0x1<<30)) != 0x0) ? 0x1 : 0x0;
+                c_bits = (c_bits & (~(0x1 << (j/2)))) | (c_bit << (j/2));
+            }
+            // Parity (27 bits of every sub frame)
+            uint32_t count_ones32 = count_ones8[(b[i]>>24)&0x7f] + // exclueding P
+                                    count_ones8[(b[i]>>16)&0xff] +
+                                    count_ones8[(b[i]>> 8)&0xff] +
+                                    count_ones8[(b[i]>> 0)&0xf0];  // excluding sync
+            if ((count_ones32 & 0x1) != (b[i] >> 31)) {
+                parity_err_count++;
             }
         }
     }
@@ -238,26 +271,8 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
         decode_pg.get_default_config,
         gcfg.data_pin
     );
-}
-
-int spdif_rx_status()
-{
-    int flag = (sync_ok && block_count != prev_block_count);
-    prev_block_count = block_count;
-    return flag;
-}
-
-uint32_t spdif_rx_get_samp_freq()
-{
-    float bitrate = (float) BUF_SIZE * 2 * 8 * 1e6 / ave_block_interval;
-    float samp_freq = bitrate / 32.0;
-    if (samp_freq >= (float) (SAMP_FREQ_44100 - 100) && samp_freq < (float) (SAMP_FREQ_44100 + 100)) {
-        return SAMP_FREQ_44100;
-    } else if (samp_freq >= (float) (SAMP_FREQ_48000) - 100 && samp_freq < (float) (SAMP_FREQ_48000 + 100)) {
-        return SAMP_FREQ_48000;
-    } else {
-        return 0;
-    }
+    sync_ok = false;
+    parity_err_count = 0;
 }
 
 void spdif_rx_search_next()
@@ -279,4 +294,36 @@ void spdif_rx_search_next()
         decode_pg.get_default_config,
         gcfg.data_pin
     );
+    sync_ok = false;
+    parity_err_count = 0;
+}
+
+bool spdif_rx_status()
+{
+    bool flag = (sync_ok && block_count != prev_block_count);
+    prev_block_count = block_count;
+    return flag;
+}
+
+uint32_t spdif_rx_get_samp_freq()
+{
+    float bitrate = (float) BUF_SIZE * 2 * 8 * 1e6 / ave_block_interval;
+    float samp_freq = bitrate / 32.0;
+    if (samp_freq >= (float) (SAMP_FREQ_44100 - 100) && samp_freq < (float) (SAMP_FREQ_44100 + 100)) {
+        return SAMP_FREQ_44100;
+    } else if (samp_freq >= (float) (SAMP_FREQ_48000) - 100 && samp_freq < (float) (SAMP_FREQ_48000 + 100)) {
+        return SAMP_FREQ_48000;
+    } else {
+        return 0;
+    }
+}
+
+uint32_t spdif_rx_get_c_bits()
+{
+    return c_bits;
+}
+
+uint32_t spdif_rx_get_parity_err_count()
+{
+    return parity_err_count;
 }
