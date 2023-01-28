@@ -101,8 +101,12 @@ int main()
     printf("setup done\n");
 
     while (true) {
-        // Echo characters received from PIO to the console
-        spdif_rx_status();
+        if (spdif_rx_status()) {
+            uint32_t samp_freq = spdif_rx_get_samp_freq();
+            printf("Samp Freq = %7.4f KHz\n", samp_freq  / 1e3);
+        } else {
+            printf("stable sync not detected\n");
+        }
         tight_loop_contents();
         sleep_ms(1000);
     }

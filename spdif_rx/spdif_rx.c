@@ -21,15 +21,6 @@
 uint32_t buff[2][BUF_SIZE];
 dma_channel_config dma_config0;
 dma_channel_config dma_config1;
-dma_channel_config dma_config2;
-uint8_t prevOut;
-uint32_t syncSymCount = 0;
-uint32_t dataCount = 0;
-uint32_t totalCount = 0;
-uint32_t errorCount = 0;
-uint32_t frameCount = 0;
-uint32_t blockCount = 0;
-bool detectedSync = false;
 
 // ---- select at most one ---
 CU_REGISTER_DEBUG_PINS(spdif_rx_timing)
@@ -44,12 +35,13 @@ CU_REGISTER_DEBUG_PINS(spdif_rx_timing)
 static uint loaded_offset = 0;
 spdif_rx_config_t shared_state;
 
-static int count = 0;
-static uint64_t prevTime = 0;
-static uint64_t interval[10];
-static float aveInterval;
-static int prevPosSyncB = 0;
-static bool syncOk = false;
+static int block_count = 0;
+static int prev_block_count = 0;
+static uint64_t prev_time = 0;
+static uint64_t block_interval[10];
+static float ave_block_interval;
+static int  prev_pos_syncB = 0;
+static int sync_ok = 0;
 #define SYNC_B 0b1111
 #define SYNC_M 0b1011
 #define SYNC_W 0b0111
@@ -64,26 +56,51 @@ static inline uint32_t _millis(void)
 	return to_ms_since_boot(get_absolute_time());
 }
 
-bool syncCheck(uint32_t b[BUF_SIZE])
+static void _spdif_rx_check()
+{
+    printf("done\n");
+    uint32_t* data = buff[0];
+    for (int i = 0; i < BUF_SIZE; i++) {
+        uint32_t left  = (data[i*2+0] >> 12) & 0xffff;
+        uint32_t right = (data[i*2+1] >> 12) & 0xffff;
+        printf("L = %04x, R = %04x\n", left, right);
+    }
+    while (true) {}
+}
+
+static void _spdif_rx_direct_check()
+{
+    printf("done\n");
+    uint32_t* data = buff[0];
+    for (int i = 0; i < BUF_SIZE*2; i++) {
+        printf("%08x\n", data[i]);
+    }
+    while (true) {}
+}
+
+static int _syncCheck(uint32_t b[BUF_SIZE])
 {
     for (int i = 0; i < BUF_SIZE; i++) {
         uint32_t sync = b[i] & 0xf;
         if (sync == SYNC_B) {
-            if (syncOk) {
-                if (prevPosSyncB != i) {
-                    syncOk = false;
+            if (sync_ok) {
+                if (prev_pos_syncB != i) {
+                    sync_ok = 0;
                     break;
                 }
             } else {
-                syncOk = true;
-                prevPosSyncB = i;
+                sync_ok = 1;
+                prev_pos_syncB = i;
             }
-        } else if (syncOk && ((i % 2 == prevPosSyncB % 2 && sync != SYNC_M) || (i % 2 != prevPosSyncB % 2 && sync != SYNC_W))) {
-            syncOk = false;
-            break;
+        //} else if (sync_ok && ((i % 2 == prev_pos_syncB % 2 && sync != SYNC_M) || (i % 2 != prev_pos_syncB % 2 && sync != SYNC_W))) {
+        } else if (sync_ok) {
+            if ((i % 2 == prev_pos_syncB % 2 && sync != SYNC_M) || (i % 2 != prev_pos_syncB % 2 && sync != SYNC_W)) {
+                sync_ok = false;
+                break;
+            }
         }
     }
-    return syncOk;
+    return sync_ok;
 }
 
 // irq handler for DMA
@@ -92,13 +109,13 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     uint dma_channel1 = shared_state.dma_channel1;
     uint8_t sm = shared_state.pio_sm;
     uint64_t now = _micros();
-    interval[count % 10] = now - prevTime;
+    block_interval[block_count % 10] = now - prev_time;
     uint64_t accum = 0;
     for (int i = 0; i < 10; i++) {
-        accum += interval[i];
+        accum += block_interval[i];
     }
-    aveInterval = (float) accum / 10;
-    count++;
+    ave_block_interval = (float) accum / 10;
+    block_count++;
 
     if ((dma_intsx & (1u << dma_channel0))) {
         dma_intsx = 1u << dma_channel0;
@@ -111,11 +128,13 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             BUF_SIZE, // count
             false // trigger
         );
-        syncCheck(buff[0]);
+        _syncCheck(buff[0]);
         //printf("0");
         DEBUG_PINS_CLR(spdif_rx_timing, 4);
     }
     if ((dma_intsx & (1u << dma_channel1))) {
+        //_spdif_rx_check();
+        //_spdif_rx_direct_check();
         dma_intsx = 1u << dma_channel1;
         DEBUG_PINS_SET(spdif_rx_timing, 4);
         dma_channel_configure(
@@ -126,11 +145,11 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             BUF_SIZE, // count
             false // trigger
         );
-        syncCheck(buff[1]);
+        _syncCheck(buff[1]);
         //printf("1");
         DEBUG_PINS_CLR(spdif_rx_timing, 4);
     }
-    prevTime = now;
+    prev_time = now;
 }
 
 void spdif_rx_end()
@@ -205,25 +224,22 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     spdif_rx_program_init(spdif_rx_pio, sm, loaded_offset, config->data_pin);
 }
 
-void spdif_rx_status()
+int spdif_rx_status()
 {
-    if (syncOk) {
-        float bitrate = (float) BUF_SIZE * 2 * 8 * 1e6 / aveInterval;
-        //printf("bitrate = %7.4f Kbps interval = %7.4f\n", bitrate / 1e3, aveInterval);
-        printf("Samp Freq = %7.4f KHz\n", bitrate  / 1e3 / 32.0);
-    } else {
-        printf("stable sync not detected\n");
-    }
+    int flag = (sync_ok && block_count != prev_block_count);
+    prev_block_count = block_count;
+    return flag;
 }
 
-void spdif_rx_check()
+uint32_t spdif_rx_get_samp_freq()
 {
-    printf("done\n");
-    uint32_t* data = buff[0];
-    for (int i = 0; i < BUF_SIZE; i++) {
-        uint32_t left  = (data[i*2+0] >> 12) & 0xffff;
-        uint32_t right = (data[i*2+1] >> 12) & 0xffff;
-        printf("L = %04x, R = %04x\n", left, right);
+    float bitrate = (float) BUF_SIZE * 2 * 8 * 1e6 / ave_block_interval;
+    float samp_freq = bitrate / 32.0;
+    if (samp_freq >= (float) (SAMP_FREQ_44100 - 100) && samp_freq < (float) (SAMP_FREQ_44100 + 100)) {
+        return SAMP_FREQ_44100;
+    } else if (samp_freq >= (float) (SAMP_FREQ_48000) - 100 && samp_freq < (float) (SAMP_FREQ_48000 + 100)) {
+        return SAMP_FREQ_48000;
+    } else {
+        return 0;
     }
-    while (true) {}
 }

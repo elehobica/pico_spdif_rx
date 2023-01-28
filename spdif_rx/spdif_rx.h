@@ -43,10 +43,13 @@ typedef struct spdif_rx_config {
     uint8_t dma_channel1;
 } spdif_rx_config_t;
 
+#define SAMP_FREQ_44100 (44100)
+#define SAMP_FREQ_48000 (48000)
+
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();
-void spdif_rx_check();
-void spdif_rx_status();
+int spdif_rx_status();
+uint32_t spdif_rx_get_samp_freq();
 
 #ifdef __cplusplus
 }
