@@ -54,6 +54,7 @@ typedef enum _spdif_rx_samp_freq_t {
 
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();
+void spdif_rx_claim_rd_fifo();
 bool spdif_rx_status();
 float spdif_rx_get_get_samp_freq_actual();
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq();

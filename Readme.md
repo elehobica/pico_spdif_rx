@@ -6,9 +6,19 @@
 * Raspberry Pi Pico
 
 ## Pin Assignment
+### SPDIF Rx
 | Pico Pin # | GPIO | Function | Connection |
 ----|----|----|----
 | 20 | GP15 | DATA | from SPDIF/TOS-Link Data output|
+
+### PCM5102
+| Pico Pin # | GPIO | Function | Connection |
+----|----|----|----
+| 21 | GP16 | BCK | to PCM5102 BCK (13) |
+| 22 | GP17 | LRCK | to PCM5102 LRCK (15) |
+| 23 | GND | GND | GND |
+| 24 | GP18 | SDO | to PCM5102 DIN (14) |
+| 40 | VBUS | VCC | to VIN of PCM5102 board |
 
 ## How to build
 * See ["Getting started with Raspberry Pi Pico"](https://datasheets.raspberrypi.org/pico/getting-started-with-pico.pdf)
@@ -21,6 +31,11 @@
 > git submodule update -i
 > cd ..
 > git clone -b master https://github.com/raspberrypi/pico-examples.git
+>
+> git clone https://github.com/raspberrypi/pico-extras.git
+> cd pico-extras
+> git submodule update -i
+> cd ..
 > 
 > git clone -b main https://github.com/elehobica/pico_spdif_rx.git
 ```

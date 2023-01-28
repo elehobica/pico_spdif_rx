@@ -4,8 +4,8 @@
 / refer to https://opensource.org/licenses/BSD-2-Clause
 /------------------------------------------------------*/
 
-#define PICO_SPDIF_RX_PIO 0
-#define PICO_SPDIF_RX_DMA_IRQ 0
+#define PICO_SPDIF_RX_PIO 1
+#define PICO_SPDIF_RX_DMA_IRQ 1
 
 #include <stdio.h>
 #include <string.h>
@@ -18,8 +18,8 @@
 #include "hardware/irq.h"
 #include "spdif_rx.pio.h"
 
-#define BUF_SIZE (384)
-uint32_t buff[2][BUF_SIZE];
+#define BLOCK_SIZE (384) // sub frames per block
+uint32_t block_buff[2][BLOCK_SIZE]; // for pingpong buffer
 dma_channel_config dma_config0;
 dma_channel_config dma_config1;
 
@@ -57,7 +57,7 @@ static uint64_t block_interval[10];
 static float ave_block_interval;
 static bool block_aligned = false;
 static int block_align_count = 0;
-static uint trans_count = BUF_SIZE;
+static uint trans_count = BLOCK_SIZE;
 static uint32_t c_bits;
 static uint32_t parity_err_count = 0;
 
@@ -92,8 +92,8 @@ static inline uint32_t _millis(void)
 static void _spdif_rx_check()
 {
     printf("done\n");
-    uint32_t* data = buff[0];
-    for (int i = 0; i < BUF_SIZE; i++) {
+    uint32_t* data = block_buff[0];
+    for (int i = 0; i < BLOCK_SIZE; i++) {
         uint32_t left  = (data[i*2+0] >> 12) & 0xffff;
         uint32_t right = (data[i*2+1] >> 12) & 0xffff;
         printf("L = %04x, R = %04x\n", left, right);
@@ -104,19 +104,31 @@ static void _spdif_rx_check()
 static void _spdif_rx_direct_check()
 {
     printf("done\n");
-    uint32_t* data = buff[0];
-    for (int i = 0; i < BUF_SIZE*2; i++) {
+    uint32_t* data = block_buff[0];
+    for (int i = 0; i < BLOCK_SIZE*2; i++) {
         printf("%08x\n", data[i]);
     }
     while (true) {}
 }
 
-static int _checkBlock(uint32_t b[BUF_SIZE])
+// spdif_rx block callback function to be defined at external
+__attribute__((weak))
+void spdif_rx_callback_func(uint32_t *buff, size_t size, uint32_t c_bits, bool parity)
+{
+    /*
+	uint32_t time = _millis();
+    printf("spdif_rx_callback_func %d\n", time);
+    */
+    return;
+}
+
+static int _checkBlock(uint32_t buff[BLOCK_SIZE])
 {
     uint pos_syncB = 0;
+    uint32_t block_parity_err_count = 0;
 
-    for (int i = 0; i < BUF_SIZE; i++) {
-        uint32_t sync = b[i] & 0xf;
+    for (int i = 0; i < BLOCK_SIZE; i++) {
+        uint32_t sync = buff[i] & 0xf;
         if (sync == SYNC_B) {
             block_aligned = (i == 0);
             pos_syncB = i;
@@ -129,32 +141,34 @@ static int _checkBlock(uint32_t b[BUF_SIZE])
             // VUCP handling
             // C bits (heading 32bit only)
             if (i % 2 == 0 && i >= 0 && i < 64) { // using even sub frame of heading 32 frames of each block
-                uint32_t c_bit = ((b[i] & (0x1<<30)) != 0x0) ? 0x1 : 0x0;
+                uint32_t c_bit = ((buff[i] & (0x1<<30)) != 0x0) ? 0x1 : 0x0;
                 c_bits = (c_bits & (~(0x1 << (i/2)))) | (c_bit << (i/2));
             }
             // Parity (27 bits of every sub frame)
-            uint32_t count_ones32 = count_ones8[(b[i]>>24) & 0x7f] + // exclueding P
-                                    count_ones8[(b[i]>>16) & 0xff] +
-                                    count_ones8[(b[i]>> 8) & 0xff] +
-                                    count_ones8[(b[i]>> 0) & 0xf0];  // excluding sync
-            if ((count_ones32 & 0x1) != (b[i] >> 31)) {
-                parity_err_count++;
+            uint32_t count_ones32 = count_ones8[(buff[i]>>24) & 0x7f] + // exclueding P
+                                    count_ones8[(buff[i]>>16) & 0xff] +
+                                    count_ones8[(buff[i]>> 8) & 0xff] +
+                                    count_ones8[(buff[i]>> 0) & 0xf0];  // excluding sync
+            if ((count_ones32 & 0x1) != (buff[i] >> 31)) {
+                block_parity_err_count++;
             }
         }
     }
+    parity_err_count += block_parity_err_count;
     // block align adjustment
-    if (!block_aligned) {
+    if (block_aligned) {
+        trans_count = BLOCK_SIZE;
+        spdif_rx_callback_func(buff, trans_count, c_bits, block_parity_err_count > 0);
+    } else {
         if (pos_syncB != 0 && block_align_count == 0) {
-            // dispose pos_syncB to align because buff[BUF_SIZE-1] was (BUF_SIZE - pos_syncB)'th sub frame
+            // dispose pos_syncB to align because block_buff[BLOCK_SIZE-1] was (BLOCK_SIZE - pos_syncB)'th sub frame
             // it takes 3 blocks to align because coming 2 transfers already issued
             trans_count = pos_syncB;
             block_align_count = 3;
         } else {
-            trans_count = BUF_SIZE;
+            trans_count = BLOCK_SIZE;
             if (block_align_count > 0) { block_align_count--; }
         }
-    } else {
-        trans_count = BUF_SIZE;
     }
 
     return block_aligned;
@@ -176,12 +190,12 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         dma_channel_configure(
             gcfg.dma_channel0,
             &dma_config0,
-            buff[0], // dest
+            block_buff[0], // dest
             &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
             trans_count, // count
             false // trigger
         );
-        _checkBlock(buff[0]);
+        _checkBlock(block_buff[0]);
         //printf("0");
     }
     if ((dma_intsx & (1u << gcfg.dma_channel1))) {
@@ -191,12 +205,12 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         dma_channel_configure(
             gcfg.dma_channel1,
             &dma_config1,
-            buff[1], // dest
+            block_buff[1], // dest
             &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
             trans_count, // count
             false // trigger
         );
-        _checkBlock(buff[1]);
+        _checkBlock(block_buff[1]);
         //printf("1");
     }
     prev_time = now;
@@ -213,6 +227,11 @@ void spdif_rx_end()
     irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
     dma_channel_set_irqx_enabled(gcfg.dma_channel0, 0);
     dma_channel_set_irqx_enabled(gcfg.dma_channel1, 0);
+}
+
+void spdif_rx_claim_rd_fifo()
+{
+
 }
 
 void spdif_rx_setup(const spdif_rx_config_t *config)
@@ -238,9 +257,9 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     dma_channel_configure(
         gcfg.dma_channel0,
         &dma_config0,
-        buff[0], // dest
+        block_buff[0], // dest
         &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-        BUF_SIZE, // count
+        BLOCK_SIZE, // count
         false // trigger
     );
 
@@ -255,9 +274,9 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     dma_channel_configure(
         gcfg.dma_channel1,
         &dma_config1,
-        buff[1], // dest
+        block_buff[1], // dest
         &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-        BUF_SIZE, // count
+        BLOCK_SIZE, // count
         false // trigger
     );
 
@@ -318,7 +337,7 @@ bool spdif_rx_status()
 
 float spdif_rx_get_get_samp_freq_actual()
 {
-    float bitrate16 = (float) BUF_SIZE * 2 * 8 * 1e6 / ave_block_interval;
+    float bitrate16 = (float) BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
     return bitrate16 / 32.0;
 }
 
