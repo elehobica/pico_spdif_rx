@@ -55,8 +55,9 @@ static int prev_block_count = 0;
 static uint64_t prev_time = 0;
 static uint64_t block_interval[10];
 static float ave_block_interval;
-static int  prev_pos_syncB = 0;
-static bool sync_ok = false;
+static bool block_aligned = false;
+static int block_align_count = 0;
+static uint trans_count = BUF_SIZE;
 static uint32_t c_bits;
 static uint32_t parity_err_count = 0;
 
@@ -110,43 +111,53 @@ static void _spdif_rx_direct_check()
     while (true) {}
 }
 
-static bool _syncCheck(uint32_t b[BUF_SIZE])
+static int _checkBlock(uint32_t b[BUF_SIZE])
 {
+    uint pos_syncB = 0;
+
     for (int i = 0; i < BUF_SIZE; i++) {
         uint32_t sync = b[i] & 0xf;
         if (sync == SYNC_B) {
-            if (sync_ok) {
-                if (prev_pos_syncB != i) {
-                    sync_ok = false;
-                    break;
-                }
-            } else {
-                sync_ok = true;
-                prev_pos_syncB = i;
-            }
-        } else if (sync_ok) {
-            if ((i % 2 == prev_pos_syncB % 2 && sync != SYNC_M) || (i % 2 != prev_pos_syncB % 2 && sync != SYNC_W)) {
-                sync_ok = false;
+            block_aligned = (i == 0);
+            pos_syncB = i;
+        }
+        if (block_aligned) {
+            if ((i % 2 == 0 && (sync != SYNC_B && sync != SYNC_M)) || (i % 2 != 0 && sync != SYNC_W)) {
+                block_aligned = false;
                 break;
             }
             // VUCP handling
             // C bits (heading 32bit only)
-            int j = (i + BUF_SIZE - prev_pos_syncB) % BUF_SIZE;
-            if (j % 2 == 0 && j >= 0 && j < 64) {
+            if (i % 2 == 0 && i >= 0 && i < 64) { // using even sub frame of heading 32 frames of each block
                 uint32_t c_bit = ((b[i] & (0x1<<30)) != 0x0) ? 0x1 : 0x0;
-                c_bits = (c_bits & (~(0x1 << (j/2)))) | (c_bit << (j/2));
+                c_bits = (c_bits & (~(0x1 << (i/2)))) | (c_bit << (i/2));
             }
             // Parity (27 bits of every sub frame)
-            uint32_t count_ones32 = count_ones8[(b[i]>>24)&0x7f] + // exclueding P
-                                    count_ones8[(b[i]>>16)&0xff] +
-                                    count_ones8[(b[i]>> 8)&0xff] +
-                                    count_ones8[(b[i]>> 0)&0xf0];  // excluding sync
+            uint32_t count_ones32 = count_ones8[(b[i]>>24) & 0x7f] + // exclueding P
+                                    count_ones8[(b[i]>>16) & 0xff] +
+                                    count_ones8[(b[i]>> 8) & 0xff] +
+                                    count_ones8[(b[i]>> 0) & 0xf0];  // excluding sync
             if ((count_ones32 & 0x1) != (b[i] >> 31)) {
                 parity_err_count++;
             }
         }
     }
-    return sync_ok;
+    // block align adjustment
+    if (!block_aligned) {
+        if (pos_syncB != 0 && block_align_count == 0) {
+            // dispose pos_syncB to align because buff[BUF_SIZE-1] was (BUF_SIZE - pos_syncB)'th sub frame
+            // it takes 3 blocks to align because coming 2 transfers already issued
+            trans_count = pos_syncB;
+            block_align_count = 3;
+        } else {
+            trans_count = BUF_SIZE;
+            if (block_align_count > 0) { block_align_count--; }
+        }
+    } else {
+        trans_count = BUF_SIZE;
+    }
+
+    return block_aligned;
 }
 
 // irq handler for DMA
@@ -167,10 +178,10 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             &dma_config0,
             buff[0], // dest
             &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-            BUF_SIZE, // count
+            trans_count, // count
             false // trigger
         );
-        _syncCheck(buff[0]);
+        _checkBlock(buff[0]);
         //printf("0");
     }
     if ((dma_intsx & (1u << gcfg.dma_channel1))) {
@@ -182,10 +193,10 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             &dma_config1,
             buff[1], // dest
             &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-            BUF_SIZE, // count
+            trans_count, // count
             false // trigger
         );
-        _syncCheck(buff[1]);
+        _checkBlock(buff[1]);
         //printf("1");
     }
     prev_time = now;
@@ -271,7 +282,7 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
         decode_pg.get_default_config,
         gcfg.data_pin
     );
-    sync_ok = false;
+    block_aligned = false;
     parity_err_count = 0;
 }
 
@@ -294,13 +305,13 @@ void spdif_rx_search_next()
         decode_pg.get_default_config,
         gcfg.data_pin
     );
-    sync_ok = false;
+    block_aligned = false;
     parity_err_count = 0;
 }
 
 bool spdif_rx_status()
 {
-    bool flag = (sync_ok && block_count != prev_block_count);
+    bool flag = (block_aligned && block_count != prev_block_count);
     prev_block_count = block_count;
     return flag;
 }
