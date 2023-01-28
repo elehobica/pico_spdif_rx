@@ -20,6 +20,11 @@
 ; 24bit Audio Format
 ; Sync (8) + 24bit Audio (48) + VUCP (8)
 ;
+; VUCP
+;  P: parity should be checked every sub frame (checking 27bits excluded sync and P out of 32 bits )
+;  C: using heading 32 frames' value as bit 0 to 31 out of 192 frames (C value of 2 sub frames should be the same)
+;   further detail for C bits, see https://www.minidisc.org/spdif_c_channel.html
+;
 ; [SPDIF Frame Format] (2 Sub Frames)
 ; B(L) + W(R) : head block
 ; M(L) + W(R) : succeeding blocks

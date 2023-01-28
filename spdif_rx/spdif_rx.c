@@ -305,16 +305,21 @@ bool spdif_rx_status()
     return flag;
 }
 
-uint32_t spdif_rx_get_samp_freq()
+float spdif_rx_get_get_samp_freq_actual()
 {
-    float bitrate = (float) BUF_SIZE * 2 * 8 * 1e6 / ave_block_interval;
-    float samp_freq = bitrate / 32.0;
+    float bitrate16 = (float) BUF_SIZE * 2 * 8 * 1e6 / ave_block_interval;
+    return bitrate16 / 32.0;
+}
+
+spdif_rx_samp_freq_t spdif_rx_get_samp_freq()
+{
+    float samp_freq = spdif_rx_get_get_samp_freq_actual();
     if (samp_freq >= (float) (SAMP_FREQ_44100 - 100) && samp_freq < (float) (SAMP_FREQ_44100 + 100)) {
         return SAMP_FREQ_44100;
     } else if (samp_freq >= (float) (SAMP_FREQ_48000) - 100 && samp_freq < (float) (SAMP_FREQ_48000 + 100)) {
         return SAMP_FREQ_48000;
     } else {
-        return 0;
+        return SAMP_FREQ_NONE;
     }
 }
 
