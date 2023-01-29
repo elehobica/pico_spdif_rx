@@ -55,14 +55,15 @@ typedef enum _spdif_rx_samp_freq_t {
 
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();
-audio_buffer_pool_t* spdif_rx_claim_audio_buffer(uint32_t sample_count);
-void spdif_rx_unclaim_audio_buffer();
 bool spdif_rx_status();
-float spdif_rx_get_get_samp_freq_actual();
+float spdif_rx_get_samp_freq_actual();
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq();
 void spdif_rx_search_next();
 uint32_t spdif_rx_get_c_bits();
 uint32_t spdif_rx_get_parity_err_count();
+uint32_t spdif_rx_get_fifo_count();
+uint32_t spdif_rx_read_fifo(uint32_t** buff, uint32_t req_count);
+uint32_t* spdif_rx_read_fifo_single();
 
 #ifdef __cplusplus
 }
