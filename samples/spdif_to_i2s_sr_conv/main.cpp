@@ -18,7 +18,7 @@ static constexpr int32_t DAC_ZERO = 1;
 static int16_t buf_s16[SAMPLES_PER_BUFFER*2]; // 16bit 2ch data before applying volume
 static audio_buffer_pool_t *ap;
 
-audio_buffer_pool_t *audio_init()
+audio_buffer_pool_t *i2s_audio_init(audio_buffer_pool_t *producer_pool)
 {
     static audio_format_t audio_format = {
         .sample_freq = 44100,
@@ -26,12 +26,14 @@ audio_buffer_pool_t *audio_init()
         .channel_count = AUDIO_CHANNEL_STEREO
     };
 
+    /*
     static audio_buffer_format_t producer_format = {
         .format = &audio_format,
         .sample_stride = 8
     };
 
     audio_buffer_pool_t *producer_pool = audio_new_producer_pool(&producer_format, 3, SAMPLES_PER_BUFFER);
+    */
 
     bool __unused ok;
     const audio_format_t *output_format;
@@ -119,6 +121,7 @@ void measure_freqs(void) {
     // Can't measure clk_ref / xosc as it is the ref
 }
 
+/*
 extern "C" {
 void i2s_callback_func();
 }
@@ -130,6 +133,7 @@ void i2s_callback_func()
 {
     decode();
 }
+*/
 
 int main()
 {
@@ -151,9 +155,10 @@ int main()
         .dma_channel1 = 2
     };
     spdif_rx_setup(&config);
+    audio_buffer_pool_t* audio_buffer = spdif_rx_claim_audio_buffer(PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH);
     printf("spdif_rx setup done\n");
 
-    ap = audio_init();
+    ap = i2s_audio_init(audio_buffer);
 
     while (true) {
         if (spdif_rx_status()) {

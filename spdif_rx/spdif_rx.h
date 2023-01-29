@@ -7,6 +7,7 @@
 #pragma once
 
 #include "pico/stdlib.h"
+#include "pico/audio.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,7 +55,8 @@ typedef enum _spdif_rx_samp_freq_t {
 
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();
-void spdif_rx_claim_rd_fifo();
+audio_buffer_pool_t* spdif_rx_claim_audio_buffer(uint32_t sample_count);
+void spdif_rx_unclaim_audio_buffer();
 bool spdif_rx_status();
 float spdif_rx_get_get_samp_freq_actual();
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq();

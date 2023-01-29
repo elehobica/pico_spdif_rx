@@ -36,6 +36,14 @@ dma_channel_config dma_config1;
 
 static spdif_rx_config_t gcfg;
 
+audio_format_t audio_format;
+audio_buffer_format_t audio_buffer_format = {
+    .format = &audio_format,
+};
+static audio_buffer_t audio_buffer;
+static audio_buffer_pool_t *producer_pool = NULL;
+bool use_audio_buffer = false;
+
 typedef struct {
     const pio_program_t *program;
     uint offset;
@@ -111,10 +119,35 @@ static void _spdif_rx_direct_check()
     while (true) {}
 }
 
-// spdif_rx block callback function to be defined at external
+// default spdif_rx block callback function (you may override at external)
 __attribute__((weak))
-void spdif_rx_callback_func(uint32_t *buff, size_t size, uint32_t c_bits, bool parity)
+void spdif_rx_callback_func(uint32_t *buff, uint32_t sub_frame_count, uint32_t c_bits, bool parity_err)
 {
+    if (producer_pool == NULL) { return; }
+
+    audio_buffer_t *buffer;
+    if ((buffer = take_audio_buffer(producer_pool, false)) == NULL) { return; }
+
+    #ifdef DEBUG_PLAYAUDIO
+    {
+        uint32_t time = to_ms_since_boot(get_absolute_time());
+        printf("AUDIO::decode start at %d ms\n", time);
+    }
+    #endif // DEBUG_PLAYAUDIO
+
+    int32_t *samples = (int32_t *) buffer->buffer->bytes;
+    //buffer->sample_count = buffer->max_sample_count;
+    //printf("sample_count = %d, max = %d\n", buffer->sample_count, buffer->max_sample_count);
+    // sample freq difference adjustment
+    if (buffer->sample_count > sub_frame_count / 2) {
+        buffer->sample_count = sub_frame_count / 2;
+    }
+    for (int i = 0; i < buffer->sample_count; i++) {
+        samples[i*2+0] = (int32_t) (((buff[i*2+0] >> 12) & 0xffff) << 16) / 64; // temporary volume
+        samples[i*2+1] = (int32_t) (((buff[i*2+1] >> 12) & 0xffff) << 16) / 64; // temporary volume
+    }
+    give_audio_buffer(producer_pool, buffer);
+
     /*
 	uint32_t time = _millis();
     printf("spdif_rx_callback_func %d\n", time);
@@ -216,24 +249,6 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     prev_time = now;
 }
 
-void spdif_rx_end()
-{
-    pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
-    spdif_rx_pio_program_t decode_pg = decode_sets[program_id];
-    pio_remove_program(spdif_rx_pio, decode_pg.program, decode_pg.offset);
-    pio_clear_instruction_memory(spdif_rx_pio);
-    dma_channel_unclaim(gcfg.dma_channel0);
-    dma_channel_unclaim(gcfg.dma_channel1);
-    irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
-    dma_channel_set_irqx_enabled(gcfg.dma_channel0, 0);
-    dma_channel_set_irqx_enabled(gcfg.dma_channel1, 0);
-}
-
-void spdif_rx_claim_rd_fifo()
-{
-
-}
-
 void spdif_rx_setup(const spdif_rx_config_t *config)
 {
     memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
@@ -303,6 +318,54 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     );
     block_aligned = false;
     parity_err_count = 0;
+}
+
+void spdif_rx_end()
+{
+    pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
+    spdif_rx_pio_program_t decode_pg = decode_sets[program_id];
+    pio_remove_program(spdif_rx_pio, decode_pg.program, decode_pg.offset);
+    pio_clear_instruction_memory(spdif_rx_pio);
+    dma_channel_unclaim(gcfg.dma_channel0);
+    dma_channel_unclaim(gcfg.dma_channel1);
+    irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
+    dma_channel_set_irqx_enabled(gcfg.dma_channel0, 0);
+    dma_channel_set_irqx_enabled(gcfg.dma_channel1, 0);
+}
+
+audio_buffer_pool_t* spdif_rx_claim_audio_buffer(uint32_t sample_count)
+{
+    static audio_format_t audio_format = {
+        .sample_freq = 44100,
+        .pcm_format = AUDIO_PCM_FORMAT_S32,
+        .channel_count = AUDIO_CHANNEL_STEREO
+    };
+
+    static audio_buffer_format_t producer_format = {
+        .format = &audio_format,
+        .sample_stride = 8
+    };
+
+    producer_pool = audio_new_producer_pool(&producer_format, 3, sample_count);
+
+    /*
+    audio_buffer.buffer = pico_buffer_alloc(sample_count * 4);
+    audio_buffer.sample_count = sample_count;
+    audio_buffer.format = &audio_buffer_format;
+    audio_buffer_format.sample_stride = 4;
+    audio_format.sample_freq = (uint32_t) SAMP_FREQ_NONE; // should be set later
+    audio_format.pcm_format = AUDIO_PCM_FORMAT_S32;
+    audio_format.channel_count = AUDIO_CHANNEL_STEREO;
+    */
+
+    //use_audio_buffer = true;
+    return producer_pool;
+}
+
+void spdif_rx_unclaim_audio_buffer()
+{
+    producer_pool = NULL;
+    //use_audio_buffer = false;
 }
 
 void spdif_rx_search_next()
