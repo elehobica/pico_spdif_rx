@@ -25,6 +25,11 @@ extern "C" {
 #define PICO_SPDIF_RX_PIO1 1
 #endif
 
+// PICO_CONFIG: SPINLOCK_ID_SPDIF_RX_PREPARED_LISTS_LOCK, Spinlock number for the audio prepared list, min=0, max=31, default=8, group=audio
+#ifndef SPINLOCK_ID_SPDIF_RX_PREPARED_LISTS_LOCK
+#define SPINLOCK_ID_SPDIF_RX_PREPARED_LISTS_LOCK 12
+#endif
+
 #if !(PICO_SPDIF_RX_DMA_IRQ == 0 || PICO_SPDIF_RX_DMA_IRQ == 1)
 #error PICO_SPDIF_RX_DMA_IRQ must be 0 or 1
 #endif
@@ -42,6 +47,7 @@ typedef struct _spdif_rx_config_t {
     uint8_t pio_sm;
     uint8_t dma_channel0;
     uint8_t dma_channel1;
+    bool full_check; // if false, no C_bits info, no parity check, no callback, but fast processing
 } spdif_rx_config_t;
 
 typedef enum _spdif_rx_samp_freq_t {

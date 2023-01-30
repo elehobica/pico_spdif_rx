@@ -12,11 +12,13 @@
 #include "spdif_rx.h"
 
 #include "pico/stdlib.h"
-#include "pico/multicore.h"
 #include "hardware/pio.h"
 #include "hardware/dma.h"
 #include "hardware/irq.h"
+#include "hardware/sync.h"
 #include "spdif_rx.pio.h"
+
+static spin_lock_t* spdif_rx_spin_lock;
 
 #define BLOCK_SIZE (384) // sub frames per block
 #define NUM_BLOCKS (8) // must be >= 2
@@ -53,14 +55,6 @@ static audio_buffer_format_t producer_format = {
     .format = &audio_format,
     .sample_stride = 8
 };
-/*
-static audio_format_t audio_format;
-static audio_buffer_format_t producer_format = {
-    .format = &audio_format,
-    .sample_stride = 8
-};
-*/
-//static audio_buffer_t audio_buffer;
 static audio_buffer_pool_t *producer_pool = NULL;
 bool use_audio_buffer = false;
 
@@ -211,6 +205,9 @@ static int _checkBlock(uint32_t buff[BLOCK_SIZE])
                 block_aligned = false;
                 break;
             }
+            if (!gcfg.full_check) {
+                return true;
+            }
             // VUCP handling
             // C bits (heading 32bit only)
             if (i % 2 == 0 && i >= 0 && i < 64) { // using even sub frame of heading 32 frames of each block
@@ -262,6 +259,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
 
     if ((dma_intsx & (1u << gcfg.dma_channel0))) {
         dma_intsx = 1u << gcfg.dma_channel0;
+        uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
         uint32_t done_ptr = buff_wr_done_ptr;
         if (block_aligned) {
             if (spdif_rx_get_fifo_count() + BLOCK_SIZE > FIFO_SIZE) {
@@ -281,11 +279,13 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             false // trigger
         );
         buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, BLOCK_SIZE);
+        spin_unlock(spdif_rx_spin_lock, save);
         _checkBlock(to_buff_ptr(done_ptr));
         //printf("0");
     }
     if ((dma_intsx & (1u << gcfg.dma_channel1))) {
         dma_intsx = 1u << gcfg.dma_channel1;
+        uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
         uint32_t done_ptr = buff_wr_done_ptr;
         if (block_aligned) {
             if (spdif_rx_get_fifo_count() + BLOCK_SIZE > FIFO_SIZE) {
@@ -308,6 +308,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             false // trigger
         );
         buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, BLOCK_SIZE);
+        spin_unlock(spdif_rx_spin_lock, save);
         _checkBlock(to_buff_ptr(done_ptr));
         //printf("1");
     }
@@ -316,6 +317,8 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
 
 void spdif_rx_setup(const spdif_rx_config_t *config)
 {
+    spdif_rx_spin_lock = spin_lock_init(SPINLOCK_ID_AUDIO_FREE_LIST_LOCK);
+
     memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
     // === PIO configuration ===
     pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
@@ -469,6 +472,7 @@ uint32_t spdif_rx_get_fifo_count()
 
 uint32_t spdif_rx_read_fifo(uint32_t** buff, uint32_t req_count)
 {
+    uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
     uint32_t get_count = req_count;
     uint32_t fifo_count = spdif_rx_get_fifo_count();
     if (get_count > fifo_count) {
@@ -482,13 +486,16 @@ uint32_t spdif_rx_read_fifo(uint32_t** buff, uint32_t req_count)
         *buff = to_buff_ptr(buff_rd_ptr);
         buff_rd_ptr = ptr_inc(buff_rd_ptr, get_count);
     }
+    spin_unlock(spdif_rx_spin_lock, save);
     return get_count;
 }
 
 uint32_t* spdif_rx_read_fifo_single()
 {
+    uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
     uint32_t* buff = to_buff_ptr(buff_rd_ptr);
     buff_rd_ptr = ptr_inc(buff_rd_ptr, 1);
     //printf("ptr = %d, buff_ptr = %d\n", buff_rd_ptr, (int) buff);
+    spin_unlock(spdif_rx_spin_lock, save);
     return buff;
 }

@@ -51,7 +51,8 @@ int main()
         .data_pin = PIN_PICO_SPDIF_RX_DATA,
         .pio_sm = 0,
         .dma_channel0 = 0,
-        .dma_channel1 = 1
+        .dma_channel1 = 1,
+        .full_check = true
     };
     spdif_rx_setup(&config);
     printf("setup done\n");

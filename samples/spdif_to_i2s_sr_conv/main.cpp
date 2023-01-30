@@ -64,6 +64,7 @@ audio_buffer_pool_t *i2s_audio_init()
     return producer_pool;
 }
 
+static int flag = false;
 void decode()
 {
     audio_buffer_t *buffer;
@@ -76,37 +77,46 @@ void decode()
     }
     #endif // DEBUG_PLAYAUDIO
 
-    int32_t *samples = (int32_t *) buffer->buffer->bytes;
-    buffer->sample_count = buffer->max_sample_count;
     uint32_t fifo_count = spdif_rx_get_fifo_count();
-    if (fifo_count <= 384 * 3) {
-        pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
-        printf("<");
-    } else if (fifo_count <= 384 * 5) {
-        pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 0); // This scheme includes clock Jitter
-        printf("-");
-    } else {
-        pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 1); // This scheme includes clock Jitter
-        printf(">");
-    }
-    if (buffer->sample_count > fifo_count / 2) {
-        buffer->sample_count = fifo_count / 2;
-    }
-    if (buffer->sample_count == 576) {
-        printf(".");
-    }
-    uint32_t total_count = buffer->sample_count * 2;
-    int i = 0;
-    uint32_t read_count = 0;
-    uint32_t* buff;
-    while (read_count < total_count) {
-        uint32_t get_count = spdif_rx_read_fifo(&buff, total_count - read_count);
-        for (int j = 0; j < get_count / 2; j++) {
-            samples[i*2+0] = (int32_t) (((buff[j*2+0] >> 12) & 0xffff) << 16) / 64 + DAC_ZERO; // temporary volume
-            samples[i*2+1] = (int32_t) (((buff[j*2+1] >> 12) & 0xffff) << 16) / 64 + DAC_ZERO; // temporary volume
-            i++;
+    buffer->sample_count = buffer->max_sample_count;
+    int32_t *samples = (int32_t *) buffer->buffer->bytes;
+    if (flag == false && fifo_count < PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH * 2) {
+        for (int i = 0; i < buffer->sample_count; i++) {
+            samples[i*2+0] = DAC_ZERO; // temporary volume
+            samples[i*2+1] = DAC_ZERO; // temporary volume
         }
-        read_count += get_count;
+    } else {
+        flag = true;
+        if (fifo_count <= 384 * 3) {
+            pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
+            printf("<");
+        } else if (fifo_count <= 384 * 5) {
+            pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 0); // This scheme includes clock Jitter
+            printf("-");
+        } else {
+            pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 1); // This scheme includes clock Jitter
+            printf(">");
+        }
+        //printf("%d,", fifo_count);
+        if (buffer->sample_count > fifo_count / 2) {
+            buffer->sample_count = fifo_count / 2;
+        }
+        if (buffer->sample_count == 576) {
+            printf(".");
+        }
+        uint32_t total_count = buffer->sample_count * 2;
+        int i = 0;
+        uint32_t read_count = 0;
+        uint32_t* buff;
+        while (read_count < total_count) {
+            uint32_t get_count = spdif_rx_read_fifo(&buff, total_count - read_count);
+            for (int j = 0; j < get_count / 2; j++) {
+                samples[i*2+0] = (int32_t) (((buff[j*2+0] >> 12) & 0xffff) << 16) / 64 + DAC_ZERO; // temporary volume
+                samples[i*2+1] = (int32_t) (((buff[j*2+1] >> 12) & 0xffff) << 16) / 64 + DAC_ZERO; // temporary volume
+                i++;
+            }
+            read_count += get_count;
+        }
     }
     give_audio_buffer(ap, buffer);
 
@@ -175,12 +185,14 @@ int main()
         .data_pin = PIN_PICO_SPDIF_RX_DATA,
         .pio_sm = 0,
         .dma_channel0 = 1,
-        .dma_channel1 = 2
+        .dma_channel1 = 2,
+        .full_check = false
     };
     spdif_rx_setup(&config);
     printf("spdif_rx setup done\n");
 
     ap = i2s_audio_init();
+    //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
 
     while (true) {
         if (spdif_rx_status()) {
