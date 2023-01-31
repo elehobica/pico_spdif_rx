@@ -61,7 +61,7 @@ typedef enum _spdif_rx_samp_freq_t {
 
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();
-bool spdif_rx_status();
+bool spdif_rx_get_status();
 float spdif_rx_get_samp_freq_actual();
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq();
 void spdif_rx_search_next();

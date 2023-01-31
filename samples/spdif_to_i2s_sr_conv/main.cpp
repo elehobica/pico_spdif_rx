@@ -64,7 +64,6 @@ audio_buffer_pool_t *i2s_audio_init()
     return producer_pool;
 }
 
-static int flag = false;
 void decode()
 {
     audio_buffer_t *buffer;
@@ -77,16 +76,15 @@ void decode()
     }
     #endif // DEBUG_PLAYAUDIO
 
-    uint32_t fifo_count = spdif_rx_get_fifo_count();
+    uint32_t fifo_count = (spdif_rx_get_status()) ? spdif_rx_get_fifo_count() : 0;
     buffer->sample_count = buffer->max_sample_count;
     int32_t *samples = (int32_t *) buffer->buffer->bytes;
-    if (flag == false && fifo_count < PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH * 2) {
+    if (fifo_count < PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH * 2) {
         for (int i = 0; i < buffer->sample_count; i++) {
             samples[i*2+0] = DAC_ZERO; // temporary volume
             samples[i*2+1] = DAC_ZERO; // temporary volume
         }
     } else {
-        flag = true;
         if (fifo_count <= 384 * 3) {
             pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
             printf("<");
@@ -195,7 +193,7 @@ int main()
     //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
 
     while (true) {
-        if (spdif_rx_status()) {
+        if (spdif_rx_get_status()) {
             uint32_t samp_freq = spdif_rx_get_samp_freq();
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
             //printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);

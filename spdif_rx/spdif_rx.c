@@ -426,11 +426,11 @@ void spdif_rx_search_next()
     parity_err_count = 0;
 }
 
-bool spdif_rx_status()
+bool spdif_rx_get_status()
 {
-    bool flag = (block_aligned && block_count != prev_block_count);
-    prev_block_count = block_count;
-    return flag;
+    uint64_t now = _micros();
+    // false if not block_aligned or no IRQ in recent 10 ms
+    return (block_aligned && (now <= prev_time + 10000));
 }
 
 float spdif_rx_get_samp_freq_actual()
