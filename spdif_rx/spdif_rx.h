@@ -56,8 +56,9 @@ typedef enum _spdif_rx_samp_freq_t {
     SAMP_FREQ_48000 = 48000
 } spdif_rx_samp_freq_t;
 
-#define SAMP_FREQ_44100 (44100)
-#define SAMP_FREQ_48000 (48000)
+#define SPDIF_BLOCK_SIZE (384) // sub frames per block
+#define NUM_BLOCKS (8) // must be >= 2
+#define SPDIF_RX_FIFO_SIZE (NUM_BLOCKS * SPDIF_BLOCK_SIZE)
 
 void spdif_rx_setup(const spdif_rx_config_t *config);
 void spdif_rx_end();

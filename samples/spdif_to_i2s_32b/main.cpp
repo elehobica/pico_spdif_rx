@@ -19,10 +19,33 @@ static constexpr int32_t DAC_ZERO = 1;
 static int16_t buf_s16[SAMPLES_PER_BUFFER*2]; // 16bit 2ch data before applying volume
 static audio_buffer_pool_t *ap;
 
-audio_buffer_pool_t *i2s_audio_init()
+#define audio_pio __CONCAT(pio, PICO_AUDIO_I2S_PIO)
+
+static io_rw_32* reg_clkdiv;
+static io_rw_32 clkdiv_tbl[3];
+typedef enum _clkdiv_speed_t {
+    CLKDIV_FAST = 0,
+    CLKDIV_NORM = 1,
+    CLKDIV_SLOW = 2
+} clkdiv_speed_t;
+
+void save_center_clkdiv(PIO pio, uint sm)
+{
+    reg_clkdiv = &(pio->sm[sm].clkdiv);
+    clkdiv_tbl[CLKDIV_NORM] = *reg_clkdiv;
+    clkdiv_tbl[CLKDIV_FAST] = clkdiv_tbl[CLKDIV_NORM] - (1 << PIO_SM0_CLKDIV_FRAC_LSB);
+    clkdiv_tbl[CLKDIV_SLOW] = clkdiv_tbl[CLKDIV_NORM] + (1 << PIO_SM0_CLKDIV_FRAC_LSB);
+}
+
+void set_offset_clkdiv(clkdiv_speed_t speed)
+{
+    *reg_clkdiv = clkdiv_tbl[speed];
+}
+
+audio_buffer_pool_t *i2s_audio_init(uint32_t sample_freq)
 {
     static audio_format_t audio_format = {
-        .sample_freq = 44100,
+        .sample_freq = sample_freq,
         .pcm_format = AUDIO_PCM_FORMAT_S32,
         .channel_count = AUDIO_CHANNEL_STEREO
     };
@@ -60,12 +83,15 @@ audio_buffer_pool_t *i2s_audio_init()
         buffer->sample_count = buffer->max_sample_count;
         give_audio_buffer(producer_pool, buffer);
     }
+    save_center_clkdiv(audio_pio, config.pio_sm);
     audio_i2s_set_enabled(true);
     return producer_pool;
 }
 
 void decode()
 {
+    static bool mute_flag = true;
+
     audio_buffer_t *buffer;
     if ((buffer = take_audio_buffer(ap, false)) == nullptr) { return; }
 
@@ -76,23 +102,35 @@ void decode()
     }
     #endif // DEBUG_PLAYAUDIO
 
-    uint32_t fifo_count = (spdif_rx_get_status()) ? spdif_rx_get_fifo_count() : 0;
     buffer->sample_count = buffer->max_sample_count;
     int32_t *samples = (int32_t *) buffer->buffer->bytes;
-    if (fifo_count < PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH * 2) {
-        for (int i = 0; i < buffer->sample_count; i++) {
-            samples[i*2+0] = DAC_ZERO; // temporary volume
-            samples[i*2+1] = DAC_ZERO; // temporary volume
+
+    uint32_t fifo_count = spdif_rx_get_fifo_count();
+    if (spdif_rx_get_status()) {
+        if (mute_flag && fifo_count >= SPDIF_RX_FIFO_SIZE / 2) {
+            mute_flag = false;
         }
     } else {
-        if (fifo_count <= 384 * 3) {
-            pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
+        mute_flag = true;
+    }
+
+    if (mute_flag) {
+        for (int i = 0; i < buffer->sample_count; i++) {
+            samples[i*2+0] = DAC_ZERO;
+            samples[i*2+1] = DAC_ZERO;
+        }
+    } else {
+        if (fifo_count <= SPDIF_RX_FIFO_SIZE / 2 - SPDIF_BLOCK_SIZE) {
+            set_offset_clkdiv(CLKDIV_SLOW);
+            //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
             printf("<");
-        } else if (fifo_count <= 384 * 5) {
-            pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 0); // This scheme includes clock Jitter
+        } else if (fifo_count <= SPDIF_RX_FIFO_SIZE / 2 + SPDIF_BLOCK_SIZE) {
+            set_offset_clkdiv(CLKDIV_NORM);
+            //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 0); // This scheme includes clock Jitter
             printf("-");
         } else {
-            pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 1); // This scheme includes clock Jitter
+            set_offset_clkdiv(CLKDIV_FAST);
+            //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 1); // This scheme includes clock Jitter
             printf(">");
         }
         //printf("%d,", fifo_count);
@@ -126,7 +164,7 @@ void decode()
     #endif // DEBUG_PLAYAUDIO
 }
 
-void audio_deinit()
+void i2s_audio_deinit()
 {
     audio_i2s_set_enabled(false);
     audio_i2s_end();
@@ -189,22 +227,26 @@ int main()
     spdif_rx_setup(&config);
     printf("spdif_rx setup done\n");
 
-    ap = i2s_audio_init();
-    //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
-
+    bool configured = false;
     while (true) {
         if (spdif_rx_get_status()) {
             uint32_t samp_freq = spdif_rx_get_samp_freq();
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-            //printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
-            //printf("c_bits = 0x%08x\n", spdif_rx_get_c_bits());
-            //printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
+            if (!configured) {
+                printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
+                ap = i2s_audio_init(samp_freq);
+                configured = true;
+            }
         } else {
-            printf("stable sync not detected\n");
+            if (configured) {
+                printf("stable sync not detected\n");
+                i2s_audio_deinit();
+            }
+            configured = false;
             spdif_rx_search_next();
         }
         tight_loop_contents();
-        sleep_ms(1000);
+        sleep_ms(500);
     }
 
     return 0;

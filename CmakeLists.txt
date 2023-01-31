@@ -20,7 +20,7 @@ set(bin_name "pico_spdif_rx")
 # select sample application here (choose only one)
 add_executable(${bin_name}
     #samples/detect_samp_freq/main.cpp
-    samples/spdif_to_i2s_sr_conv/main.cpp
+    samples/spdif_to_i2s_32b/main.cpp
 )
 
 target_link_libraries(${bin_name}

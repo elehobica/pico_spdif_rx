@@ -20,10 +20,7 @@
 
 static spin_lock_t* spdif_rx_spin_lock;
 
-#define BLOCK_SIZE (384) // sub frames per block
-#define NUM_BLOCKS (8) // must be >= 2
-#define FIFO_SIZE (NUM_BLOCKS * BLOCK_SIZE)
-uint32_t fifo_buff[FIFO_SIZE];
+uint32_t fifo_buff[SPDIF_RX_FIFO_SIZE];
 static uint32_t buff_wr_pre_ptr = 0;
 static uint32_t buff_wr_done_ptr = 0;
 static uint32_t buff_rd_ptr = 0;
@@ -79,7 +76,7 @@ static uint64_t block_interval[10];
 static float ave_block_interval;
 static bool block_aligned = false;
 static int block_align_count = 0;
-static uint trans_count = BLOCK_SIZE;
+static uint trans_count = SPDIF_BLOCK_SIZE;
 static uint32_t c_bits;
 static uint32_t parity_err_count = 0;
 
@@ -113,19 +110,19 @@ static inline uint32_t _millis(void)
 
 static uint32_t ptr_inc(uint32_t ptr, uint32_t count)
 {
-    return (ptr + count) % (FIFO_SIZE * 2);
+    return (ptr + count) % (SPDIF_RX_FIFO_SIZE * 2);
 }
 
 static uint32_t* to_buff_ptr(uint32_t ptr)
 {
-    return fifo_buff + ptr % FIFO_SIZE;
+    return fifo_buff + ptr % SPDIF_RX_FIFO_SIZE;
 }
 
 static void _spdif_rx_check()
 {
     printf("done\n");
     uint32_t* data = &fifo_buff[0];
-    for (int i = 0; i < BLOCK_SIZE; i++) {
+    for (int i = 0; i < SPDIF_BLOCK_SIZE; i++) {
         uint32_t left  = (data[i*2+0] >> 12) & 0xffff;
         uint32_t right = (data[i*2+1] >> 12) & 0xffff;
         printf("L = %04x, R = %04x\n", left, right);
@@ -137,7 +134,7 @@ static void _spdif_rx_direct_check()
 {
     printf("done\n");
     uint32_t* data = &fifo_buff[0];
-    for (int i = 0; i < BLOCK_SIZE*2; i++) {
+    for (int i = 0; i < SPDIF_BLOCK_SIZE*2; i++) {
         printf("%08x\n", data[i]);
     }
     while (true) {}
@@ -189,12 +186,12 @@ void spdif_rx_callback_func(uint32_t *buff, uint32_t sub_frame_count, uint32_t c
     return;
 }
 
-static int _checkBlock(uint32_t buff[BLOCK_SIZE])
+static int _checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
 {
     uint pos_syncB = 0;
     uint32_t block_parity_err_count = 0;
 
-    for (int i = 0; i < BLOCK_SIZE; i++) {
+    for (int i = 0; i < SPDIF_BLOCK_SIZE; i++) {
         uint32_t sync = buff[i] & 0xf;
         if (sync == SYNC_B) {
             block_aligned = (i == 0);
@@ -227,18 +224,18 @@ static int _checkBlock(uint32_t buff[BLOCK_SIZE])
     parity_err_count += block_parity_err_count;
     // block align adjustment
     if (block_aligned) {
-        trans_count = BLOCK_SIZE;
+        trans_count = SPDIF_BLOCK_SIZE;
         if (spdif_rx_get_samp_freq() != SAMP_FREQ_NONE) {
             spdif_rx_callback_func(buff, trans_count, c_bits, block_parity_err_count > 0);
         }
     } else {
         if (pos_syncB != 0 && block_align_count == 0) {
-            // dispose pos_syncB to align because fifo_buff[BLOCK_SIZE-1] was (BLOCK_SIZE - pos_syncB)'th sub frame
+            // dispose pos_syncB to align because fifo_buff[SPDIF_BLOCK_SIZE-1] was (SPDIF_BLOCK_SIZE - pos_syncB)'th sub frame
             // it takes 3 blocks to align because coming 2 transfers already issued
             trans_count = pos_syncB;
             block_align_count = 3;
         } else {
-            trans_count = BLOCK_SIZE;
+            trans_count = SPDIF_BLOCK_SIZE;
             if (block_align_count > 0) { block_align_count--; }
         }
     }
@@ -262,12 +259,13 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
         uint32_t done_ptr = buff_wr_done_ptr;
         if (block_aligned) {
-            if (spdif_rx_get_fifo_count() + BLOCK_SIZE > FIFO_SIZE) {
+            if (spdif_rx_get_fifo_count() + SPDIF_BLOCK_SIZE > SPDIF_RX_FIFO_SIZE) {
                 printf("spdif_rx fifo overflow\n");
+                buff_rd_ptr = ptr_inc(buff_rd_ptr, SPDIF_BLOCK_SIZE); // dispose overflow data
             }
-            buff_wr_done_ptr = ptr_inc(done_ptr, BLOCK_SIZE);
+            buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
         } else { // if status is not ready, fifo should be empty
-            buff_wr_done_ptr = ptr_inc(done_ptr, BLOCK_SIZE);
+            buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
             buff_rd_ptr = buff_wr_done_ptr;
         }
         dma_channel_configure(
@@ -278,7 +276,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             trans_count, // count
             false // trigger
         );
-        buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, BLOCK_SIZE);
+        buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, SPDIF_BLOCK_SIZE);
         spin_unlock(spdif_rx_spin_lock, save);
         _checkBlock(to_buff_ptr(done_ptr));
         //printf("0");
@@ -288,15 +286,16 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
         uint32_t done_ptr = buff_wr_done_ptr;
         if (block_aligned) {
-            if (spdif_rx_get_fifo_count() + BLOCK_SIZE > FIFO_SIZE) {
+            if (spdif_rx_get_fifo_count() + SPDIF_BLOCK_SIZE > SPDIF_RX_FIFO_SIZE) {
                 printf("spdif_rx fifo overflow\n");
+                buff_rd_ptr = ptr_inc(buff_rd_ptr, SPDIF_BLOCK_SIZE); // dispose overflow data
             }
-            buff_wr_done_ptr = ptr_inc(done_ptr, BLOCK_SIZE);
+            buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
         } else { // if status is not ready, fifo should be empty
-            buff_wr_done_ptr = ptr_inc(done_ptr, BLOCK_SIZE);
+            buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
             buff_rd_ptr = buff_wr_done_ptr;
         }
-        buff_wr_done_ptr = ptr_inc(done_ptr, BLOCK_SIZE);
+        buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
         //_spdif_rx_check();
         //_spdif_rx_direct_check();
         dma_channel_configure(
@@ -307,7 +306,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
             trans_count, // count
             false // trigger
         );
-        buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, BLOCK_SIZE);
+        buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, SPDIF_BLOCK_SIZE);
         spin_unlock(spdif_rx_spin_lock, save);
         _checkBlock(to_buff_ptr(done_ptr));
         //printf("1");
@@ -342,10 +341,10 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
         &dma_config0,
         to_buff_ptr(buff_wr_pre_ptr), // dest
         &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-        BLOCK_SIZE, // count
+        SPDIF_BLOCK_SIZE, // count
         false // trigger
     );
-    buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, BLOCK_SIZE);
+    buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, SPDIF_BLOCK_SIZE);
 
     // DMA1
     dma_config1 = dma_channel_get_default_config(gcfg.dma_channel1);
@@ -360,10 +359,10 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
         &dma_config1,
         to_buff_ptr(buff_wr_pre_ptr), // dest
         &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-        BLOCK_SIZE, // count
+        SPDIF_BLOCK_SIZE, // count
         false // trigger
     );
-    buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, BLOCK_SIZE);
+    buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, SPDIF_BLOCK_SIZE);
 
     // DMA IRQ
     irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
@@ -435,7 +434,7 @@ bool spdif_rx_get_status()
 
 float spdif_rx_get_samp_freq_actual()
 {
-    float bitrate16 = (float) BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
+    float bitrate16 = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
     return bitrate16 / 32.0;
 }
 
@@ -466,7 +465,7 @@ uint32_t spdif_rx_get_fifo_count()
     if (buff_wr_done_ptr >= buff_rd_ptr) {
         return buff_wr_done_ptr - buff_rd_ptr;
     } else {
-        return buff_wr_done_ptr + FIFO_SIZE*2 - buff_rd_ptr;
+        return buff_wr_done_ptr + SPDIF_RX_FIFO_SIZE*2 - buff_rd_ptr;
     }
 }
 
@@ -478,11 +477,11 @@ uint32_t spdif_rx_read_fifo(uint32_t** buff, uint32_t req_count)
     if (get_count > fifo_count) {
         get_count = fifo_count;
     }
-    if ((buff_rd_ptr % FIFO_SIZE) + get_count <= FIFO_SIZE) { // cannot take due to the end of fifo_buff
+    if ((buff_rd_ptr % SPDIF_RX_FIFO_SIZE) + get_count <= SPDIF_RX_FIFO_SIZE) { // cannot take due to the end of fifo_buff
         *buff = to_buff_ptr(buff_rd_ptr);
         buff_rd_ptr = ptr_inc(buff_rd_ptr, get_count);
     } else {
-        get_count = FIFO_SIZE - (buff_rd_ptr % FIFO_SIZE);
+        get_count = SPDIF_RX_FIFO_SIZE - (buff_rd_ptr % SPDIF_RX_FIFO_SIZE);
         *buff = to_buff_ptr(buff_rd_ptr);
         buff_rd_ptr = ptr_inc(buff_rd_ptr, get_count);
     }
