@@ -48,13 +48,6 @@ static audio_format_t audio_format = {
     .channel_count = AUDIO_CHANNEL_STEREO
 };
 
-static audio_buffer_format_t producer_format = {
-    .format = &audio_format,
-    .sample_stride = 8
-};
-static audio_buffer_pool_t *producer_pool = NULL;
-bool use_audio_buffer = false;
-
 typedef struct {
     const pio_program_t *program;
     uint offset;
@@ -70,7 +63,6 @@ static spdif_rx_pio_program_t decode_sets[] = {
 static int program_id = 0;
 
 static int block_count = 0;
-static int prev_block_count = 0;
 static uint64_t prev_time = 0;
 static uint64_t block_interval[10];
 static float ave_block_interval;
@@ -80,7 +72,7 @@ static uint trans_count = SPDIF_BLOCK_SIZE;
 static uint32_t c_bits;
 static uint32_t parity_err_count = 0;
 
-const char count_ones8[256] =
+static const char count_ones8[256] =
 	"\x00\x01\x01\x02\x01\x02\x02\x03\x01\x02\x02\x03\x02\x03\x03\x04"
 	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
 	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
@@ -118,75 +110,14 @@ static uint32_t* to_buff_ptr(uint32_t ptr)
     return fifo_buff + ptr % SPDIF_RX_FIFO_SIZE;
 }
 
-static void _spdif_rx_check()
-{
-    printf("done\n");
-    uint32_t* data = &fifo_buff[0];
-    for (int i = 0; i < SPDIF_BLOCK_SIZE; i++) {
-        uint32_t left  = (data[i*2+0] >> 12) & 0xffff;
-        uint32_t right = (data[i*2+1] >> 12) & 0xffff;
-        printf("L = %04x, R = %04x\n", left, right);
-    }
-    while (true) {}
-}
-
-static void _spdif_rx_direct_check()
-{
-    printf("done\n");
-    uint32_t* data = &fifo_buff[0];
-    for (int i = 0; i < SPDIF_BLOCK_SIZE*2; i++) {
-        printf("%08x\n", data[i]);
-    }
-    while (true) {}
-}
-
 // default spdif_rx block callback function (you may override at external)
 __attribute__((weak))
 void spdif_rx_callback_func(uint32_t *buff, uint32_t sub_frame_count, uint32_t c_bits, bool parity_err)
 {
     return;
-    static int count = 0;
-    if (producer_pool == NULL) { return; }
-    //audio_format.sample_freq = (uint32_t) (spdif_rx_get_samp_freq_actual() + 0.5);
-    //audio_format.sample_freq = 44105;
-    //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + (count % 10)); // This scheme includes clock Jitter
-    audio_buffer_t *buffer;
-    if ((buffer = take_audio_buffer(producer_pool, false)) == NULL) { return; }
-
-    #ifdef DEBUG_PLAYAUDIO
-    {
-        uint32_t time = to_ms_since_boot(get_absolute_time());
-        printf("AUDIO::decode start at %d ms\n", time);
-    }
-    #endif // DEBUG_PLAYAUDIO
-
-    int32_t *samples = (int32_t *) buffer->buffer->bytes;
-    //buffer->sample_count = buffer->max_sample_count;
-    //printf("sample_count = %d, max = %d\n", buffer->sample_count, buffer->max_sample_count);
-    //printf("prepared_list = %d, prepared_list_tail = %d\n", (int) producer_pool->prepared_list, (int) producer_pool->prepared_list_tail);
-    // sample freq difference adjustment
-    if (buffer->sample_count > sub_frame_count / 2) {
-        buffer->sample_count = sub_frame_count / 2;
-    }
-    for (int i = 0; i < buffer->sample_count; i++) {
-        samples[i*2+0] = (int32_t) (((buff[i*2+0] >> 12) & 0xffff) << 16) / 64; // temporary volume
-        samples[i*2+1] = (int32_t) (((buff[i*2+1] >> 12) & 0xffff) << 16) / 64; // temporary volume
-    }
-    for (int i = buffer->sample_count - 1; i < buffer->sample_count; i++) {
-        samples[i*2+0] = (int32_t) (((buff[(i-1)*2+0] >> 12) & 0xffff) << 16) / 64; // temporary volume
-        samples[i*2+1] = (int32_t) (((buff[(i-1)*2+1] >> 12) & 0xffff) << 16) / 64; // temporary volume
-    }
-    give_audio_buffer(producer_pool, buffer);
-
-    /*
-	uint32_t time = _millis();
-    printf("spdif_rx_callback_func %d\n", time);
-    */
-    count++;
-    return;
 }
 
-static int _checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
+static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
 {
     uint pos_syncB = 0;
     uint32_t block_parity_err_count = 0;
@@ -243,6 +174,33 @@ static int _checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
     return block_aligned;
 }
 
+static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dma_config)
+{
+    uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
+    uint32_t done_ptr = buff_wr_done_ptr;
+    if (block_aligned) {
+        if (spdif_rx_get_fifo_count() + SPDIF_BLOCK_SIZE > SPDIF_RX_FIFO_SIZE) {
+            //printf("spdif_rx fifo overflow\n");
+            buff_rd_ptr = ptr_inc(buff_rd_ptr, SPDIF_BLOCK_SIZE); // dispose overflow data
+        }
+        buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
+    } else { // if status is not ready, fifo should be empty
+        buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
+        buff_rd_ptr = buff_wr_done_ptr;
+    }
+    dma_channel_configure(
+        dma_channel,
+        dma_config,
+        to_buff_ptr(buff_wr_pre_ptr), // dest
+        &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
+        trans_count, // count
+        false // trigger
+    );
+    buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, SPDIF_BLOCK_SIZE);
+    spin_unlock(spdif_rx_spin_lock, save);
+    return done_ptr;
+}
+
 // irq handler for DMA
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     uint64_t now = _micros();
@@ -256,60 +214,13 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
 
     if ((dma_intsx & (1u << gcfg.dma_channel0))) {
         dma_intsx = 1u << gcfg.dma_channel0;
-        uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
-        uint32_t done_ptr = buff_wr_done_ptr;
-        if (block_aligned) {
-            if (spdif_rx_get_fifo_count() + SPDIF_BLOCK_SIZE > SPDIF_RX_FIFO_SIZE) {
-                printf("spdif_rx fifo overflow\n");
-                buff_rd_ptr = ptr_inc(buff_rd_ptr, SPDIF_BLOCK_SIZE); // dispose overflow data
-            }
-            buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
-        } else { // if status is not ready, fifo should be empty
-            buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
-            buff_rd_ptr = buff_wr_done_ptr;
-        }
-        dma_channel_configure(
-            gcfg.dma_channel0,
-            &dma_config0,
-            to_buff_ptr(buff_wr_pre_ptr), // dest
-            &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-            trans_count, // count
-            false // trigger
-        );
-        buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, SPDIF_BLOCK_SIZE);
-        spin_unlock(spdif_rx_spin_lock, save);
-        _checkBlock(to_buff_ptr(done_ptr));
-        //printf("0");
+        uint32_t done_ptr = dma_done_and_restart(gcfg.dma_channel0, &dma_config0);
+        checkBlock(to_buff_ptr(done_ptr));
     }
     if ((dma_intsx & (1u << gcfg.dma_channel1))) {
         dma_intsx = 1u << gcfg.dma_channel1;
-        uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
-        uint32_t done_ptr = buff_wr_done_ptr;
-        if (block_aligned) {
-            if (spdif_rx_get_fifo_count() + SPDIF_BLOCK_SIZE > SPDIF_RX_FIFO_SIZE) {
-                printf("spdif_rx fifo overflow\n");
-                buff_rd_ptr = ptr_inc(buff_rd_ptr, SPDIF_BLOCK_SIZE); // dispose overflow data
-            }
-            buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
-        } else { // if status is not ready, fifo should be empty
-            buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
-            buff_rd_ptr = buff_wr_done_ptr;
-        }
-        buff_wr_done_ptr = ptr_inc(done_ptr, SPDIF_BLOCK_SIZE);
-        //_spdif_rx_check();
-        //_spdif_rx_direct_check();
-        dma_channel_configure(
-            gcfg.dma_channel1,
-            &dma_config1,
-            to_buff_ptr(buff_wr_pre_ptr), // dest
-            &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-            trans_count, // count
-            false // trigger
-        );
-        buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, SPDIF_BLOCK_SIZE);
-        spin_unlock(spdif_rx_spin_lock, save);
-        _checkBlock(to_buff_ptr(done_ptr));
-        //printf("1");
+        uint32_t done_ptr = dma_done_and_restart(gcfg.dma_channel1, &dma_config1);
+        checkBlock(to_buff_ptr(done_ptr));
     }
     prev_time = now;
 }
