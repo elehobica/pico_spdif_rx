@@ -21,6 +21,17 @@ static audio_buffer_pool_t *ap;
 
 #define audio_pio __CONCAT(pio, PICO_AUDIO_I2S_PIO)
 
+static audio_format_t audio_format = {
+    .sample_freq = 44100,
+    .pcm_format = AUDIO_PCM_FORMAT_S32,
+    .channel_count = AUDIO_CHANNEL_STEREO
+};
+
+static audio_buffer_format_t producer_format = {
+    .format = &audio_format,
+    .sample_stride = 8
+};
+
 static io_rw_32* reg_clkdiv;
 static io_rw_32 clkdiv_tbl[3];
 typedef enum _clkdiv_speed_t {
@@ -42,18 +53,10 @@ void set_offset_clkdiv(clkdiv_speed_t speed)
     *reg_clkdiv = clkdiv_tbl[speed];
 }
 
+
 audio_buffer_pool_t *i2s_audio_init(uint32_t sample_freq)
 {
-    static audio_format_t audio_format = {
-        .sample_freq = sample_freq,
-        .pcm_format = AUDIO_PCM_FORMAT_S32,
-        .channel_count = AUDIO_CHANNEL_STEREO
-    };
-
-    static audio_buffer_format_t producer_format = {
-        .format = &audio_format,
-        .sample_stride = 8
-    };
+    audio_format.sample_freq = sample_freq;
 
     audio_buffer_pool_t *producer_pool = audio_new_producer_pool(&producer_format, 3, SAMPLES_PER_BUFFER);
 
@@ -120,17 +123,17 @@ void decode()
             samples[i*2+1] = DAC_ZERO;
         }
     } else {
+        // I2S frequency adjustment (feedback from SPDIF_RX fffo_count)
+        // note that this scheme could increase I2S clock jitter
+        // (using pio_sm_set_clkdiv should have already include jitter unless dividing by integer)
         if (fifo_count <= SPDIF_RX_FIFO_SIZE / 2 - SPDIF_BLOCK_SIZE) {
             set_offset_clkdiv(CLKDIV_SLOW);
-            //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 + 1); // This scheme includes clock Jitter
             printf("<");
         } else if (fifo_count <= SPDIF_RX_FIFO_SIZE / 2 + SPDIF_BLOCK_SIZE) {
             set_offset_clkdiv(CLKDIV_NORM);
-            //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 0); // This scheme includes clock Jitter
             printf("-");
         } else {
             set_offset_clkdiv(CLKDIV_FAST);
-            //pio_sm_set_clkdiv_int_frac(pio0, 0, 22, 36 - 1); // This scheme includes clock Jitter
             printf(">");
         }
         //printf("%d,", fifo_count);
