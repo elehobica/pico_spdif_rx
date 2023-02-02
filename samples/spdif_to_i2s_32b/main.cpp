@@ -40,6 +40,8 @@ typedef enum _clkdiv_speed_t {
     CLKDIV_SLOW = 2
 } clkdiv_speed_t;
 
+static int32_t volume = 20;
+
 void save_center_clkdiv(PIO pio, uint sm)
 {
     reg_clkdiv = &(pio->sm[sm].clkdiv);
@@ -128,21 +130,23 @@ void decode()
         // (using pio_sm_set_clkdiv should have already include jitter unless dividing by integer)
         if (fifo_count <= SPDIF_RX_FIFO_SIZE / 2 - SPDIF_BLOCK_SIZE) {
             set_offset_clkdiv(CLKDIV_SLOW);
-            printf("<");
+            //printf("<");
         } else if (fifo_count <= SPDIF_RX_FIFO_SIZE / 2 + SPDIF_BLOCK_SIZE) {
             set_offset_clkdiv(CLKDIV_NORM);
-            printf("-");
+            //printf("-");
         } else {
             set_offset_clkdiv(CLKDIV_FAST);
-            printf(">");
+            //printf(">");
         }
         //printf("%d,", fifo_count);
         if (buffer->sample_count > fifo_count / 2) {
             buffer->sample_count = fifo_count / 2;
         }
+        /*
         if (buffer->sample_count == 576) {
             printf(".");
         }
+        */
         uint32_t total_count = buffer->sample_count * 2;
         int i = 0;
         uint32_t read_count = 0;
@@ -150,8 +154,8 @@ void decode()
         while (read_count < total_count) {
             uint32_t get_count = spdif_rx_read_fifo(&buff, total_count - read_count);
             for (int j = 0; j < get_count / 2; j++) {
-                samples[i*2+0] = (int32_t) (((buff[j*2+0] >> 12) & 0xffff) << 16) / 64 + DAC_ZERO; // temporary volume
-                samples[i*2+1] = (int32_t) (((buff[j*2+1] >> 12) & 0xffff) << 16) / 64 + DAC_ZERO; // temporary volume
+                samples[i*2+0] = (uint32_t) ((int16_t) ((buff[j*2+0] >> 12) & 0xffff)) * 256 * volume + DAC_ZERO;
+                samples[i*2+1] = (uint32_t) ((int16_t) ((buff[j*2+1] >> 12) & 0xffff)) * 256 * volume + DAC_ZERO;
                 i++;
             }
             read_count += get_count;
@@ -235,7 +239,7 @@ int main()
         if (spdif_rx_get_status()) {
             uint32_t samp_freq = spdif_rx_get_samp_freq();
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-            if (!configured) {
+            if (!configured && samp_freq != SAMP_FREQ_NONE) {
                 printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
                 ap = i2s_audio_init(samp_freq);
                 configured = true;
@@ -247,9 +251,17 @@ int main()
             }
             configured = false;
             spdif_rx_search_next();
+            sleep_ms(50);
         }
         tight_loop_contents();
-        sleep_ms(500);
+        int c = getchar_timeout_us(0);
+        if (c) {
+            if (c == '-' && volume > 0) {
+                volume--;
+            } else if ((c == '=' || c == '+') && volume < 256) {
+                volume++;
+            }
+        }
     }
 
     return 0;

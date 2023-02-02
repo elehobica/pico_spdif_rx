@@ -1,9 +1,13 @@
 # Raspberry Pi Pico spdif_rx
 
 ## Overview
+* SPDIF decoder by rp2040 PIO
+* supports to decode in 44.1 KHz, 48.0 KHz sampling frequency / 2ch / 16bit
 
 ## Supported Board and Peripheral Devices
-* Raspberry Pi Pico
+* Raspberry Pi Pico (rp2040)
+* SPDIF Coaxial or TOSLINK Rx component
+* PCM5102 (spdif_to_i2s_32 project only)
 
 ## Pin Assignment
 ### SPDIF Rx
@@ -11,7 +15,7 @@
 ----|----|----|----
 | 20 | GP15 | DATA | from SPDIF/TOS-Link Data output|
 
-### PCM5102
+### PCM5102 (spdif_to_i2s_32 project only)
 | Pico Pin # | GPIO | Function | Connection |
 ----|----|----|----
 | 21 | GP16 | BCK | to PCM5102 BCK (13) |
@@ -48,3 +52,13 @@
 > nmake
 ```
 * Put "pico_spdif_rx.uf2" on RPI-RP2 drive
+
+## Sample projects
+select target project file in `CmakeLists.txt`
+### detect_samp_freq
+* scan several frequencies until it decodes
+* display sample frequency, C bits of SPDIF frame and number of parity errors
+
+### spdif_to_i2s_32b
+* convert SPDIF input to I2S 32bit
+* push '=' or '+' to volume up, push '-' to volume down in serial console
