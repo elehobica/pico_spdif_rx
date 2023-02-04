@@ -18,6 +18,7 @@ static constexpr int SAMPLES_PER_BUFFER = PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH; /
 static constexpr int32_t DAC_ZERO = 1;
 static int16_t buf_s16[SAMPLES_PER_BUFFER*2]; // 16bit 2ch data before applying volume
 static audio_buffer_pool_t *ap;
+static bool decode_flg = false;
 
 #define audio_pio __CONCAT(pio, PICO_AUDIO_I2S_PIO)
 
@@ -55,12 +56,36 @@ void set_offset_clkdiv(clkdiv_speed_t speed)
     *reg_clkdiv = clkdiv_tbl[speed];
 }
 
+void i2s_audio_deinit()
+{
+    decode_flg = false;
+    audio_buffer_t* ab;
+    ab = get_full_audio_buffer(ap, false);
+    while (ab != NULL) {
+        free(ab->buffer);
+        printf("free producer full\n");
+        ab = get_full_audio_buffer(ap, false);
+    }
+    ab = get_free_audio_buffer(ap, false);
+    while (ab != NULL) {
+        free(ab->buffer);
+        printf("free producer take\n");
+        ab = get_free_audio_buffer(ap, false);
+    }
+
+    audio_i2s_set_enabled(false);
+    audio_i2s_end();
+
+    free(ap->free_list);
+    free(ap);
+}
 
 audio_buffer_pool_t *i2s_audio_init(uint32_t sample_freq)
 {
     audio_format.sample_freq = sample_freq;
 
     audio_buffer_pool_t *producer_pool = audio_new_producer_pool(&producer_format, 3, SAMPLES_PER_BUFFER);
+    ap = producer_pool;
 
     bool __unused ok;
     const audio_format_t *output_format;
@@ -79,26 +104,29 @@ audio_buffer_pool_t *i2s_audio_init(uint32_t sample_freq)
     ok = audio_i2s_connect(producer_pool);
     assert(ok);
     { // initial buffer data
-        audio_buffer_t *buffer = take_audio_buffer(producer_pool, true);
-        int32_t *samples = (int32_t *) buffer->buffer->bytes;
-        for (uint i = 0; i < buffer->max_sample_count; i++) {
+        audio_buffer_t *ab = take_audio_buffer(producer_pool, true);
+        int32_t *samples = (int32_t *) ab->buffer->bytes;
+        for (uint i = 0; i < ab->max_sample_count; i++) {
             samples[i*2+0] = DAC_ZERO;
             samples[i*2+1] = DAC_ZERO;
         }
-        buffer->sample_count = buffer->max_sample_count;
-        give_audio_buffer(producer_pool, buffer);
+        ab->sample_count = ab->max_sample_count;
+        give_audio_buffer(producer_pool, ab);
     }
     save_center_clkdiv(audio_pio, config.pio_sm);
     audio_i2s_set_enabled(true);
+
+    decode_flg = true;
     return producer_pool;
 }
 
 void decode()
 {
+    if (!decode_flg) { return; }
     static bool mute_flag = true;
 
-    audio_buffer_t *buffer;
-    if ((buffer = take_audio_buffer(ap, false)) == nullptr) { return; }
+    audio_buffer_t *ab;
+    if ((ab = take_audio_buffer(ap, false)) == nullptr) { return; }
 
     #ifdef DEBUG_PLAYAUDIO
     {
@@ -107,8 +135,8 @@ void decode()
     }
     #endif // DEBUG_PLAYAUDIO
 
-    buffer->sample_count = buffer->max_sample_count;
-    int32_t *samples = (int32_t *) buffer->buffer->bytes;
+    ab->sample_count = ab->max_sample_count;
+    int32_t *samples = (int32_t *) ab->buffer->bytes;
 
     uint32_t fifo_count = spdif_rx_get_fifo_count();
     if (spdif_rx_get_status()) {
@@ -120,7 +148,7 @@ void decode()
     }
 
     if (mute_flag) {
-        for (int i = 0; i < buffer->sample_count; i++) {
+        for (int i = 0; i < ab->sample_count; i++) {
             samples[i*2+0] = DAC_ZERO;
             samples[i*2+1] = DAC_ZERO;
         }
@@ -139,15 +167,10 @@ void decode()
             //printf(">");
         }
         //printf("%d,", fifo_count);
-        if (buffer->sample_count > fifo_count / 2) {
-            buffer->sample_count = fifo_count / 2;
+        if (ab->sample_count > fifo_count / 2) {
+            ab->sample_count = fifo_count / 2;
         }
-        /*
-        if (buffer->sample_count == 576) {
-            printf(".");
-        }
-        */
-        uint32_t total_count = buffer->sample_count * 2;
+        uint32_t total_count = ab->sample_count * 2;
         int i = 0;
         uint32_t read_count = 0;
         uint32_t* buff;
@@ -161,7 +184,7 @@ void decode()
             read_count += get_count;
         }
     }
-    give_audio_buffer(ap, buffer);
+    give_audio_buffer(ap, ab);
 
     #ifdef DEBUG_PLAYAUDIO
     {
@@ -169,12 +192,6 @@ void decode()
         printf("AUDIO::decode end   at %d ms\n", time);
     }
     #endif // DEBUG_PLAYAUDIO
-}
-
-void i2s_audio_deinit()
-{
-    audio_i2s_set_enabled(false);
-    audio_i2s_end();
 }
 
 void measure_freqs(void) {
@@ -233,6 +250,14 @@ int main()
     };
     spdif_rx_setup(&config);
     printf("spdif_rx setup done\n");
+
+    int i = 0;
+    while (true) {
+        ap = i2s_audio_init(44100);
+        sleep_ms(100);
+        i2s_audio_deinit();
+        printf("i = %d\n", i++);
+    }
 
     bool configured = false;
     while (true) {

@@ -124,8 +124,21 @@ void i2s_callback_loop()
 
 //void audio_i2s_end(const audio_i2s_config_t *config) {
 void audio_i2s_end() {
-    audio_buffer_t *ab = shared_state.playing_buffer;
-    queue_free_audio_buffer(audio_i2s_consumer, ab);
+    audio_buffer_t *ab;
+    ab = get_full_audio_buffer(audio_i2s_consumer, false);
+    while (ab != NULL) {
+        free(ab->buffer);
+        printf("free consumer full\n");
+        ab = get_full_audio_buffer(audio_i2s_consumer, false);
+    }
+    ab = get_free_audio_buffer(audio_i2s_consumer, false);
+    while (ab != NULL) {
+        free(ab->buffer);
+        printf("free consumer free\n");
+        ab = get_free_audio_buffer(audio_i2s_consumer, false);
+    }
+    free(audio_i2s_consumer->free_list);
+    free(audio_i2s_consumer);
     free(silence_buffer.buffer);
     shared_state.playing_buffer = NULL;
     uint8_t sm = shared_state.pio_sm;
