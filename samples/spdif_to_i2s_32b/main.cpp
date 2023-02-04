@@ -33,6 +33,21 @@ static audio_buffer_format_t producer_format = {
     .sample_stride = 8
 };
 
+static spdif_rx_config_t spdif_rx_config = {
+    .data_pin = PIN_PICO_SPDIF_RX_DATA,
+    .pio_sm = 0,
+    .dma_channel0 = 1,
+    .dma_channel1 = 2,
+    .full_check = false
+};
+
+static audio_i2s_config_t i2s_config = {
+    .data_pin = PICO_AUDIO_I2S_DATA_PIN,
+    .clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE,
+    .dma_channel = 0,
+    .pio_sm = 0
+};
+
 static io_rw_32* reg_clkdiv;
 static io_rw_32 clkdiv_tbl[3];
 typedef enum _clkdiv_speed_t {
@@ -56,6 +71,13 @@ void set_offset_clkdiv(clkdiv_speed_t speed)
     *reg_clkdiv = clkdiv_tbl[speed];
 }
 
+void i2s_audio_change_frequency(uint32_t sample_freq)
+{
+    audio_format.sample_freq = sample_freq;
+    update_pio_frequency(audio_format.sample_freq, audio_format.pcm_format, audio_format.channel_count);
+    save_center_clkdiv(audio_pio, i2s_config.pio_sm);
+}
+
 void i2s_audio_deinit()
 {
     decode_flg = false;
@@ -63,13 +85,11 @@ void i2s_audio_deinit()
     ab = get_full_audio_buffer(ap, false);
     while (ab != NULL) {
         free(ab->buffer);
-        printf("free producer full\n");
         ab = get_full_audio_buffer(ap, false);
     }
     ab = get_free_audio_buffer(ap, false);
     while (ab != NULL) {
         free(ab->buffer);
-        printf("free producer take\n");
         ab = get_free_audio_buffer(ap, false);
     }
 
@@ -89,14 +109,8 @@ audio_buffer_pool_t *i2s_audio_init(uint32_t sample_freq)
 
     bool __unused ok;
     const audio_format_t *output_format;
-    audio_i2s_config_t config = {
-        .data_pin = PICO_AUDIO_I2S_DATA_PIN,
-        .clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE,
-        .dma_channel = 0,
-        .pio_sm = 0
-    };
 
-    output_format = audio_i2s_setup(&audio_format, &audio_format, &config);
+    output_format = audio_i2s_setup(&audio_format, &audio_format, &i2s_config);
     if (!output_format) {
         panic("PicoAudio: Unable to open audio device.\n");
     }
@@ -113,7 +127,7 @@ audio_buffer_pool_t *i2s_audio_init(uint32_t sample_freq)
         ab->sample_count = ab->max_sample_count;
         give_audio_buffer(producer_pool, ab);
     }
-    save_center_clkdiv(audio_pio, config.pio_sm);
+    save_center_clkdiv(audio_pio, i2s_config.pio_sm);
     audio_i2s_set_enabled(true);
 
     decode_flg = true;
@@ -241,23 +255,10 @@ int main()
     gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
     gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWM mode for less Audio noise
 
-    spdif_rx_config_t config = {
-        .data_pin = PIN_PICO_SPDIF_RX_DATA,
-        .pio_sm = 0,
-        .dma_channel0 = 1,
-        .dma_channel1 = 2,
-        .full_check = false
-    };
-    spdif_rx_setup(&config);
+    spdif_rx_setup(&spdif_rx_config);
     printf("spdif_rx setup done\n");
 
-    int i = 0;
-    while (true) {
-        ap = i2s_audio_init(44100);
-        sleep_ms(100);
-        i2s_audio_deinit();
-        printf("i = %d\n", i++);
-    }
+    ap = i2s_audio_init(SAMP_FREQ_44100); // temporary frequency
 
     bool configured = false;
     while (true) {
@@ -266,13 +267,12 @@ int main()
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
             if (!configured && samp_freq != SAMP_FREQ_NONE) {
                 printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
-                ap = i2s_audio_init(samp_freq);
+                i2s_audio_change_frequency(samp_freq);
                 configured = true;
             }
         } else {
             if (configured) {
                 printf("stable sync not detected\n");
-                i2s_audio_deinit();
             }
             configured = false;
             spdif_rx_search_next();

@@ -128,13 +128,11 @@ void audio_i2s_end() {
     ab = get_full_audio_buffer(audio_i2s_consumer, false);
     while (ab != NULL) {
         free(ab->buffer);
-        printf("free consumer full\n");
         ab = get_full_audio_buffer(audio_i2s_consumer, false);
     }
     ab = get_free_audio_buffer(audio_i2s_consumer, false);
     while (ab != NULL) {
         free(ab->buffer);
-        printf("free consumer free\n");
         ab = get_free_audio_buffer(audio_i2s_consumer, false);
     }
     free(audio_i2s_consumer->free_list);
@@ -242,7 +240,7 @@ const audio_format_t *audio_i2s_setup(const audio_format_t *i2s_input_audio_form
     return _i2s_output_audio_format;
 }
 
-static void update_pio_frequency(uint32_t sample_freq, audio_pcm_format_t pcm_format, audio_channel_t channel_count) {
+void update_pio_frequency(uint32_t sample_freq, audio_pcm_format_t pcm_format, audio_channel_t channel_count) {
     printf("setting PIO freq for target sampling freq = %d Hz\n", (int) sample_freq);
     uint32_t system_clock_frequency = clock_get_hz(clk_sys);
     assert(system_clock_frequency < 0x40000000);
