@@ -190,8 +190,8 @@ void decode()
         while (read_count < total_count) {
             uint32_t get_count = spdif_rx_read_fifo(&buff, total_count - read_count);
             for (int j = 0; j < get_count / 2; j++) {
-                samples[i*2+0] = (uint32_t) ((int16_t) ((buff[j*2+0] >> 12) & 0xffff)) * 256 * volume + DAC_ZERO;
-                samples[i*2+1] = (uint32_t) ((int16_t) ((buff[j*2+1] >> 12) & 0xffff)) * 256 * volume + DAC_ZERO;
+                samples[i*2+0] = (int32_t) ((buff[j*2+0] & 0x0ffffff0) << 4) / 256 * volume + DAC_ZERO;
+                samples[i*2+1] = (int32_t) ((buff[j*2+1] & 0x0ffffff0) << 4) / 256 * volume + DAC_ZERO;
                 i++;
             }
             read_count += get_count;
