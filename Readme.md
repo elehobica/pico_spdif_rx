@@ -18,17 +18,6 @@
 
 ![TOSLINK_Rx_Schematic](doc/TOSLINK_Rx_Schematic.png)
 
-### PCM5102 (spdif_to_i2s_32 project only)
-| Pico Pin # | GPIO | Function | Connection |
-----|----|----|----
-| 21 | GP16 | BCK | to PCM5102 BCK (13) |
-| 22 | GP17 | LRCK | to PCM5102 LRCK (15) |
-| 23 | GND | GND | GND |
-| 24 | GP18 | SDO | to PCM5102 DIN (14) |
-| 40 | VBUS | VCC | to VIN of PCM5102 board |
-
-![PCM5102_schematic](doc/PCM5102_Schematic.png)
-
 ## How to build
 * See ["Getting started with Raspberry Pi Pico"](https://datasheets.raspberrypi.org/pico/getting-started-with-pico.pdf)
 * Build is confirmed only in Developer Command Prompt for VS 2019 and Visual Studio Code on Windows enviroment
@@ -70,4 +59,3 @@ select target project file in `CmakeLists.txt`
 
 ### spdif_to_i2s_32b
 * convert SPDIF input to I2S 32bit
-* push '=' or '+' to volume up, push '-' to volume down in serial console
