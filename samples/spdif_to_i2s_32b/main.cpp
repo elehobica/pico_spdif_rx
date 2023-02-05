@@ -136,7 +136,6 @@ audio_buffer_pool_t *i2s_audio_init(uint32_t sample_freq)
 
 void decode()
 {
-    if (!decode_flg) { return; }
     static bool mute_flag = true;
 
     audio_buffer_t *ab;
@@ -239,7 +238,9 @@ void i2s_callback_func();
 //   where i2s_callback_func() is declared with __attribute__((weak))
 void i2s_callback_func()
 {
-    decode();
+    if (decode_flg) {
+        decode();
+    }
 }
 
 int main()

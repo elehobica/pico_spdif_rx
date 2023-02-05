@@ -6,14 +6,16 @@
 
 ## Supported Board and Peripheral Devices
 * Raspberry Pi Pico (rp2040)
-* SPDIF Coaxial or TOSLINK Rx component
+* SPDIF Coaxial or TOSLINK RX178A equivalent receiver
 * PCM5102 (spdif_to_i2s_32 project only)
 
 ## Pin Assignment
 ### SPDIF Rx
 | Pico Pin # | GPIO | Function | Connection |
 ----|----|----|----
-| 20 | GP15 | DATA | from SPDIF/TOS-Link Data output|
+| 20 | GP15 | DATA | from SPDIF/TOSLINK Data output|
+
+![TOSLINK_Rx_Schematic](doc/TOSLINK_Rx_Schematic.png)
 
 ### PCM5102 (spdif_to_i2s_32 project only)
 | Pico Pin # | GPIO | Function | Connection |
@@ -23,6 +25,8 @@
 | 23 | GND | GND | GND |
 | 24 | GP18 | SDO | to PCM5102 DIN (14) |
 | 40 | VBUS | VCC | to VIN of PCM5102 board |
+
+![PCM5102_schematic](doc/PCM5102_Schematic.png)
 
 ## How to build
 * See ["Getting started with Raspberry Pi Pico"](https://datasheets.raspberrypi.org/pico/getting-started-with-pico.pdf)
