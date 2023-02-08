@@ -40,6 +40,10 @@ dma_channel_config dma_config1;
 #define SYNC_M 0b1011
 #define SYNC_W 0b0111
 
+#define SF_CRITERIA (0.01)
+#define NUM_AVE (8)
+#define NUM_STABLE_FREQ (16) // 1 ~ 31
+
 static spdif_rx_config_t gcfg;
 
 static audio_format_t audio_format = {
@@ -64,8 +68,11 @@ static int program_id = 0;
 
 static int block_count = 0;
 static uint64_t prev_time = 0;
-static uint64_t block_interval[10];
-static float ave_block_interval;
+static uint64_t block_interval[NUM_AVE];
+//static float ave_block_interval;
+static float samp_freq_actual;
+static spdif_rx_samp_freq_t samp_freq;
+static uint32_t stable_freq = 0;
 static bool block_aligned = false;
 static int block_align_count = 0;
 static uint trans_count = SPDIF_BLOCK_SIZE;
@@ -178,7 +185,7 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
 {
     uint32_t save = spin_lock_blocking(spdif_rx_spin_lock);
     uint32_t done_ptr = buff_wr_done_ptr;
-    if (block_aligned) {
+    if (spdif_rx_get_status()) {
         if (spdif_rx_get_fifo_count() + SPDIF_BLOCK_SIZE > SPDIF_RX_FIFO_SIZE) {
             //printf("spdif_rx fifo overflow\n");
             buff_rd_ptr = ptr_inc(buff_rd_ptr, SPDIF_BLOCK_SIZE); // dispose overflow data
@@ -204,12 +211,22 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
 // irq handler for DMA
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     uint64_t now = _micros();
-    block_interval[block_count % 10] = now - prev_time;
+    block_interval[block_count % NUM_AVE] = now - prev_time;
     uint64_t accum = 0;
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < NUM_AVE; i++) {
         accum += block_interval[i];
     }
-    ave_block_interval = (float) accum / 10;
+    float ave_block_interval = (float) accum / NUM_AVE;
+    float bitrate_16b = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
+    samp_freq_actual = bitrate_16b / 32.0;
+    if (samp_freq_actual >= (float) SAMP_FREQ_44100 * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) SAMP_FREQ_44100 * (1.0 + SF_CRITERIA)) {
+        samp_freq = SAMP_FREQ_44100;
+    } else if (samp_freq_actual >= (float) SAMP_FREQ_48000 * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) SAMP_FREQ_48000 * (1.0 + SF_CRITERIA)) {
+        samp_freq = SAMP_FREQ_48000;
+    } else {
+        samp_freq = SAMP_FREQ_NONE;
+    }
+    stable_freq = (stable_freq << 1) | (samp_freq != SAMP_FREQ_NONE);
     block_count++;
 
     if ((dma_intsx & (1u << gcfg.dma_channel0))) {
@@ -340,25 +357,17 @@ bool spdif_rx_get_status()
 {
     uint64_t now = _micros();
     // false if not block_aligned or no IRQ in recent 10 ms
-    return (block_aligned && (now <= prev_time + 10000));
+    return (block_aligned && (now <= prev_time + 10000) && (stable_freq & ~(1<<NUM_STABLE_FREQ)) == ~(1<<NUM_STABLE_FREQ));
 }
 
 float spdif_rx_get_samp_freq_actual()
 {
-    float bitrate16 = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
-    return bitrate16 / 32.0;
+    return samp_freq_actual;
 }
 
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq()
 {
-    float samp_freq = spdif_rx_get_samp_freq_actual();
-    if (samp_freq >= (float) (SAMP_FREQ_44100 - 100) && samp_freq < (float) (SAMP_FREQ_44100 + 100)) {
-        return SAMP_FREQ_44100;
-    } else if (samp_freq >= (float) (SAMP_FREQ_48000) - 100 && samp_freq < (float) (SAMP_FREQ_48000 + 100)) {
-        return SAMP_FREQ_48000;
-    } else {
-        return SAMP_FREQ_NONE;
-    }
+    return samp_freq;
 }
 
 uint32_t spdif_rx_get_c_bits()

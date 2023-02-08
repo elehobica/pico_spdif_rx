@@ -58,6 +58,11 @@ typedef enum _clkdiv_speed_t {
 
 static int32_t volume = 20;
 
+static inline uint32_t _millis(void)
+{
+	return to_ms_since_boot(get_absolute_time());
+}
+
 void save_center_clkdiv(PIO pio, uint sm)
 {
     reg_clkdiv = &(pio->sm[sm].clkdiv);
@@ -262,24 +267,27 @@ int main()
     ap = i2s_audio_init(SAMP_FREQ_44100); // temporary frequency
 
     bool configured = false;
+    uint32_t last_trial = 0;
     while (true) {
+        uint32_t now = _millis();
         if (spdif_rx_get_status()) {
-            uint32_t samp_freq = spdif_rx_get_samp_freq();
-            float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-            if (!configured && samp_freq != SAMP_FREQ_NONE) {
+            if (!configured) {
+                uint32_t samp_freq = spdif_rx_get_samp_freq();
+                float samp_freq_actual = spdif_rx_get_samp_freq_actual();
                 printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
                 i2s_audio_change_frequency(samp_freq);
                 configured = true;
             }
         } else {
-            if (configured) {
-                printf("stable sync not detected\n");
+            if (now - last_trial > 200) { // to give a chance to stable decode for 200 ms until next try
+                if (configured) {
+                    printf("stable sync not detected\n");
+                }
+                spdif_rx_search_next();
+                last_trial = now;
+                configured = false;
             }
-            configured = false;
-            spdif_rx_search_next();
-            sleep_ms(50);
         }
-        tight_loop_contents();
         int c = getchar_timeout_us(0);
         if (c) {
             if (c == '-' && volume > 0) {
@@ -288,6 +296,7 @@ int main()
                 volume++;
             }
         }
+        tight_loop_contents();
     }
 
     return 0;
