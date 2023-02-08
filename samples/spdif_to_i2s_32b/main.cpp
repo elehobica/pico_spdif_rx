@@ -297,6 +297,7 @@ int main()
             }
         }
         tight_loop_contents();
+        sleep_ms(10);
     }
 
     return 0;

@@ -64,21 +64,7 @@ static spdif_rx_pio_program_t decode_sets[] = {
     {&spdif_rx_inv_program, 0, spdif_rx_inv_offset_entry_point, spdif_rx_inv_program_get_default_config}
 };
 
-static int program_id = 0;
-
-static int block_count = 0;
-static uint64_t prev_time = 0;
-static uint64_t block_interval[NUM_AVE];
-//static float ave_block_interval;
-static float samp_freq_actual;
-static spdif_rx_samp_freq_t samp_freq;
-static uint32_t stable_freq = 0;
-static bool block_aligned = false;
-static int block_align_count = 0;
-static uint trans_count = SPDIF_BLOCK_SIZE;
-static uint32_t c_bits;
-static uint32_t parity_err_count = 0;
-
+static const spdif_rx_samp_freq_t samp_freq_array[] = {SAMP_FREQ_44100, SAMP_FREQ_48000};
 static const char count_ones8[256] =
 	"\x00\x01\x01\x02\x01\x02\x02\x03\x01\x02\x02\x03\x02\x03\x03\x04"
 	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
@@ -97,6 +83,20 @@ static const char count_ones8[256] =
 	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
 	"\x04\x05\x05\x06\x05\x06\x06\x07\x05\x06\x06\x07\x06\x07\x07\x08";
 
+static int pio_program_id;
+static int block_count;
+static uint64_t prev_time;
+static uint64_t block_interval[NUM_AVE];
+static bool block_aligned;
+static int block_align_count;
+static float samp_freq_actual;
+static spdif_rx_samp_freq_t samp_freq;
+static uint32_t stable_freq_history;
+static bool stable_freq_flg;
+static uint trans_count = SPDIF_BLOCK_SIZE;
+static uint32_t c_bits;
+static uint32_t parity_err_count;
+
 static inline uint64_t _micros(void)
 {
 	return to_us_since_boot(get_absolute_time());
@@ -107,12 +107,12 @@ static inline uint32_t _millis(void)
 	return to_ms_since_boot(get_absolute_time());
 }
 
-static uint32_t ptr_inc(uint32_t ptr, uint32_t count)
+static inline uint32_t ptr_inc(uint32_t ptr, uint32_t count)
 {
     return (ptr + count) % (SPDIF_RX_FIFO_SIZE * 2);
 }
 
-static uint32_t* to_buff_ptr(uint32_t ptr)
+static inline uint32_t* to_buff_ptr(uint32_t ptr)
 {
     return fifo_buff + ptr % SPDIF_RX_FIFO_SIZE;
 }
@@ -211,22 +211,26 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
 // irq handler for DMA
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     uint64_t now = _micros();
-    block_interval[block_count % NUM_AVE] = now - prev_time;
-    uint64_t accum = 0;
-    for (int i = 0; i < NUM_AVE; i++) {
-        accum += block_interval[i];
+    { // Calculate samp_freq and check if it's stable
+        block_interval[block_count % NUM_AVE] = now - prev_time;
+        uint64_t accum = 0;
+        for (int i = 0; i < NUM_AVE; i++) {
+            accum += block_interval[i];
+        }
+        float ave_block_interval = (float) accum / NUM_AVE;
+        float bitrate_16b = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
+        samp_freq_actual = bitrate_16b / 32.0;
+        spdif_rx_samp_freq_t sf = SAMP_FREQ_NONE;
+        for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
+            if (samp_freq_actual >= (float) samp_freq_array[i] * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) samp_freq_array[i] * (1.0 + SF_CRITERIA)) {
+                sf = samp_freq_array[i];
+                break;
+            }
+        }
+        stable_freq_history = (stable_freq_history << 1ul) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
+        stable_freq_flg = (stable_freq_history & ~(1ul<<NUM_STABLE_FREQ)) == ~(1ul<<NUM_STABLE_FREQ);
+        samp_freq = sf;
     }
-    float ave_block_interval = (float) accum / NUM_AVE;
-    float bitrate_16b = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
-    samp_freq_actual = bitrate_16b / 32.0;
-    if (samp_freq_actual >= (float) SAMP_FREQ_44100 * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) SAMP_FREQ_44100 * (1.0 + SF_CRITERIA)) {
-        samp_freq = SAMP_FREQ_44100;
-    } else if (samp_freq_actual >= (float) SAMP_FREQ_48000 * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) SAMP_FREQ_48000 * (1.0 + SF_CRITERIA)) {
-        samp_freq = SAMP_FREQ_48000;
-    } else {
-        samp_freq = SAMP_FREQ_NONE;
-    }
-    stable_freq = (stable_freq << 1) | (samp_freq != SAMP_FREQ_NONE);
     block_count++;
 
     if ((dma_intsx & (1u << gcfg.dma_channel0))) {
@@ -244,6 +248,16 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
 
 void spdif_rx_setup(const spdif_rx_config_t *config)
 {
+    pio_program_id = 0;
+    block_count = 0;
+    block_aligned = false;
+    block_align_count = 0;
+    stable_freq_history = 0;
+    stable_freq_flg = false;
+    trans_count = SPDIF_BLOCK_SIZE;
+    c_bits = 0;
+    parity_err_count = 0;
+
     spdif_rx_spin_lock = spin_lock_init(SPINLOCK_ID_AUDIO_FREE_LIST_LOCK);
 
     memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
@@ -303,7 +317,7 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     dma_channel_start(gcfg.dma_channel0);
 
     // PIO start
-    spdif_rx_pio_program_t decode_pg = decode_sets[program_id];
+    spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
     decode_pg.offset = pio_add_program(spdif_rx_pio, decode_pg.program);
     spdif_rx_program_init(
         spdif_rx_pio,
@@ -313,14 +327,12 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
         decode_pg.get_default_config,
         gcfg.data_pin
     );
-    block_aligned = false;
-    parity_err_count = 0;
 }
 
 void spdif_rx_end()
 {
     pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
-    spdif_rx_pio_program_t decode_pg = decode_sets[program_id];
+    spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
     pio_remove_program(spdif_rx_pio, decode_pg.program, decode_pg.offset);
     pio_clear_instruction_memory(spdif_rx_pio);
     dma_channel_unclaim(gcfg.dma_channel0);
@@ -337,8 +349,8 @@ void spdif_rx_search_next()
     pio_sm_clear_fifos(spdif_rx_pio, gcfg.pio_sm);
     pio_clear_instruction_memory(spdif_rx_pio);
     // Load another program and start
-    program_id = (program_id + 1) % (sizeof(decode_sets) / sizeof(spdif_rx_pio_program_t));
-    spdif_rx_pio_program_t decode_pg = decode_sets[program_id];
+    pio_program_id = (pio_program_id + 1) % (sizeof(decode_sets) / sizeof(spdif_rx_pio_program_t));
+    spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
     pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
     decode_pg.offset = pio_add_program(spdif_rx_pio, decode_pg.program);
     spdif_rx_program_init(
@@ -357,7 +369,7 @@ bool spdif_rx_get_status()
 {
     uint64_t now = _micros();
     // false if not block_aligned or no IRQ in recent 10 ms
-    return (block_aligned && (now <= prev_time + 10000) && (stable_freq & ~(1<<NUM_STABLE_FREQ)) == ~(1<<NUM_STABLE_FREQ));
+    return block_aligned && stable_freq_flg && (now <= prev_time + 10000);
 }
 
 float spdif_rx_get_samp_freq_actual()
