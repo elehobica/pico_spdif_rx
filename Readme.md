@@ -40,6 +40,7 @@
 * Lanuch "Developer Command Prompt for VS 2019"
 ```
 > cd pico_spdif_rx
+> cd samples\xxxxx  # desired project directory
 > mkdir build
 > cd build
 > cmake -G "NMake Makefiles" ..
@@ -52,7 +53,6 @@
 * see comments in [spdif_rx.pio](spdif_rx/spdif_rx.pio) for further detail
 
 ## Sample projects
-select target project file in `CmakeLists.txt`
 ### detect_samp_freq
 * scan candidate sampling frequencies until successfully decoded
 * display sampling frequency, C bits of SPDIF frame and number of parity errors while decoded

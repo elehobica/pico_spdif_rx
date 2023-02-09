@@ -1,26 +1,25 @@
 cmake_minimum_required(VERSION 3.12)
 
-set(PICO_SDK_PATH ${CMAKE_CURRENT_LIST_DIR}/../pico-sdk)
-include(pico_sdk_import.cmake)
-include(pico_extras_import.cmake)
+set(PICO_SDK_PATH ${CMAKE_CURRENT_LIST_DIR}/../../../pico-sdk)
+include(../pico_sdk_import.cmake)
+include(../pico_extras_import.cmake)
 
-set(project_name "pico_spdif_rx" C CXX)
+set(project_name "pico_spdif_rx" C CXX ASM)
 project(${project_name})
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-add_subdirectory(spdif_rx)
-add_subdirectory(lib/my_pico_audio)
-add_subdirectory(lib/my_pico_audio_i2s)
+add_subdirectory(../../spdif_rx spdif_rx)
+add_subdirectory(../lib/my_pico_audio my_pico_audio)
+add_subdirectory(../lib/my_pico_audio_i2s my_pico_audio_i2s)
 
 set(bin_name "pico_spdif_rx")
 
 # select sample application here (choose only one)
 add_executable(${bin_name}
-    #samples/detect_samp_freq/main.cpp
-    samples/spdif_to_i2s_32b/main.cpp
+    main.cpp
 )
 
 target_link_libraries(${bin_name}

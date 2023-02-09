@@ -58,7 +58,7 @@ int main()
     printf("setup done\n");
 
     while (true) {
-        if (spdif_rx_status()) {
+        if (spdif_rx_get_status()) {
             uint32_t samp_freq = spdif_rx_get_samp_freq();
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
             printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
