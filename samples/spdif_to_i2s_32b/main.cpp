@@ -9,7 +9,7 @@
 #include "hardware/clocks.h"
 #include "hardware/pio.h"
 #include "pico/audio_i2s.h"
-#include "spdif_rx/spdif_rx.h"
+#include "spdif_rx.h"
 
 static constexpr uint8_t PIN_DCDC_PSM_CTRL = 23;
 static constexpr uint8_t PIN_PICO_SPDIF_RX_DATA = 15;

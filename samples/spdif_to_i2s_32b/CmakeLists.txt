@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-add_subdirectory(../../spdif_rx spdif_rx)
+add_subdirectory(../.. spdif_rx)
 add_subdirectory(../lib/my_pico_audio my_pico_audio)
 add_subdirectory(../lib/my_pico_audio_i2s my_pico_audio_i2s)
 
@@ -29,7 +29,7 @@ target_link_libraries(${bin_name}
     my_pico_audio_i2s
 )
 
-target_include_directories(${bin_name} INTERFACE src)
+target_include_directories(${bin_name} PRIVATE ../../)
 
 target_compile_definitions(${bin_name} PRIVATE
     #define for our example code

@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/clocks.h"
-#include "spdif_rx/spdif_rx.h"
+#include "spdif_rx.h"
 
 static constexpr uint8_t PIN_DCDC_PSM_CTRL = 23;
 static constexpr uint8_t PIN_PICO_SPDIF_RX_DATA = 15;
