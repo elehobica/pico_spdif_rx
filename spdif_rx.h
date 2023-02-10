@@ -53,7 +53,9 @@ typedef struct _spdif_rx_config_t {
 typedef enum _spdif_rx_samp_freq_t {
     SAMP_FREQ_NONE = 0,
     SAMP_FREQ_44100 = 44100,
-    SAMP_FREQ_48000 = 48000
+    SAMP_FREQ_48000 = 48000,
+    SAMP_FREQ_88200 = 88200,
+    SAMP_FREQ_96000 = 96000
 } spdif_rx_samp_freq_t;
 
 #define SPDIF_BLOCK_SIZE (384) // sub frames per block

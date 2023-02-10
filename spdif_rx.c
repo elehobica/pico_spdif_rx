@@ -60,11 +60,18 @@ typedef struct {
 } spdif_rx_pio_program_t;
 
 static spdif_rx_pio_program_t decode_sets[] = {
-    {&spdif_rx_program,     0, spdif_rx_offset_entry_point,     spdif_rx_program_get_default_config},
-    {&spdif_rx_inv_program, 0, spdif_rx_inv_offset_entry_point, spdif_rx_inv_program_get_default_config}
+    {&spdif_rx_48k_program,     0, spdif_rx_48k_offset_entry_point,     spdif_rx_48k_program_get_default_config},
+    {&spdif_rx_48k_inv_program, 0, spdif_rx_48k_inv_offset_entry_point, spdif_rx_48k_inv_program_get_default_config},
+    {&spdif_rx_96k_program,     0, spdif_rx_96k_offset_entry_point,     spdif_rx_96k_program_get_default_config},
+    {&spdif_rx_96k_inv_program, 0, spdif_rx_96k_inv_offset_entry_point, spdif_rx_96k_inv_program_get_default_config}
+};
+static const spdif_rx_samp_freq_t samp_freq_array[] = {
+    SAMP_FREQ_44100,
+    SAMP_FREQ_48000,
+    SAMP_FREQ_88200,
+    SAMP_FREQ_96000
 };
 
-static const spdif_rx_samp_freq_t samp_freq_array[] = {SAMP_FREQ_44100, SAMP_FREQ_48000};
 static const char count_ones8[256] =
 	"\x00\x01\x01\x02\x01\x02\x02\x03\x01\x02\x02\x03\x02\x03\x03\x04"
 	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
