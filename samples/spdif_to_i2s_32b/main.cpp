@@ -36,15 +36,16 @@ static audio_buffer_format_t producer_format = {
 static spdif_rx_config_t spdif_rx_config = {
     .data_pin = PIN_PICO_SPDIF_RX_DATA,
     .pio_sm = 0,
-    .dma_channel0 = 1,
-    .dma_channel1 = 2,
+    .dma_channel0 = 2,
+    .dma_channel1 = 3,
     .full_check = false
 };
 
 static audio_i2s_config_t i2s_config = {
     .data_pin = PICO_AUDIO_I2S_DATA_PIN,
     .clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE,
-    .dma_channel = 0,
+    .dma_channel0 = 0,
+    .dma_channel1 = 1,
     .pio_sm = 0
 };
 
