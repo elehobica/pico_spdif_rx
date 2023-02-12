@@ -17,7 +17,7 @@ static constexpr uint8_t PIN_PICO_SPDIF_RX_DATA = 15;
 static constexpr int SAMPLES_PER_BUFFER = PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH; // Samples / channel
 static constexpr int32_t DAC_ZERO = 1;
 static int16_t buf_s16[SAMPLES_PER_BUFFER*2]; // 16bit 2ch data before applying volume
-static audio_buffer_pool_t *ap;
+static audio_buffer_pool_t* ap = nullptr;
 static bool decode_flg = false;
 
 #define audio_pio __CONCAT(pio, PICO_AUDIO_I2S_PIO)
@@ -57,7 +57,7 @@ typedef enum _clkdiv_speed_t {
     CLKDIV_SLOW = 2
 } clkdiv_speed_t;
 
-static int32_t volume = 20;
+static int32_t volume = 10;
 
 static inline uint32_t _millis(void)
 {
@@ -77,33 +77,34 @@ void set_offset_clkdiv(clkdiv_speed_t speed)
     *reg_clkdiv = clkdiv_tbl[speed];
 }
 
-void i2s_audio_change_frequency(uint32_t sample_freq)
-{
-    audio_format.sample_freq = sample_freq;
-    update_pio_frequency(audio_format.sample_freq, audio_format.pcm_format, audio_format.channel_count);
-    save_center_clkdiv(audio_pio, i2s_config.pio_sm);
-}
-
 void i2s_audio_deinit()
 {
     decode_flg = false;
     audio_buffer_t* ab;
-    ab = get_full_audio_buffer(ap, false);
-    while (ab != NULL) {
+    ab = take_audio_buffer(ap, false);
+    while (ab != nullptr) {
+        free(ab->buffer->bytes);
         free(ab->buffer);
-        ab = get_full_audio_buffer(ap, false);
+        ab = take_audio_buffer(ap, false);
     }
     ab = get_free_audio_buffer(ap, false);
-    while (ab != NULL) {
+    while (ab != nullptr) {
+        free(ab->buffer->bytes);
         free(ab->buffer);
         ab = get_free_audio_buffer(ap, false);
+    }
+    ab = get_full_audio_buffer(ap, false);
+    while (ab != nullptr) {
+        free(ab->buffer->bytes);
+        free(ab->buffer);
+        ab = get_full_audio_buffer(ap, false);
     }
 
     audio_i2s_set_enabled(false);
     audio_i2s_end();
 
-    free(ap->free_list);
     free(ap);
+    ap = nullptr;
 }
 
 audio_buffer_pool_t *i2s_audio_init(uint32_t sample_freq)
@@ -144,6 +145,7 @@ void decode()
 {
     static bool mute_flag = true;
 
+    if (ap == nullptr) { return; }
     audio_buffer_t *ab;
     if ((ab = take_audio_buffer(ap, false)) == nullptr) { return; }
 
@@ -265,8 +267,6 @@ int main()
     spdif_rx_setup(&spdif_rx_config);
     printf("spdif_rx setup done\n");
 
-    ap = i2s_audio_init(SAMP_FREQ_44100); // temporary frequency
-
     bool configured = false;
     uint32_t last_trial = 0;
     while (true) {
@@ -276,13 +276,16 @@ int main()
                 uint32_t samp_freq = spdif_rx_get_samp_freq();
                 float samp_freq_actual = spdif_rx_get_samp_freq_actual();
                 printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
-                i2s_audio_change_frequency(samp_freq);
+                i2s_audio_init(samp_freq);
                 configured = true;
             }
         } else {
             if (now - last_trial > 200) { // to give a chance to stable decode for 200 ms until next try
                 if (configured) {
                     printf("stable sync not detected\n");
+                    if (ap != nullptr) {
+                        i2s_audio_deinit();
+                    }
                 }
                 spdif_rx_search_next();
                 last_trial = now;

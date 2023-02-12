@@ -55,11 +55,12 @@ static dma_channel_config dma_config1;
 
 audio_format_t pio_i2s_consumer_format;
 audio_buffer_format_t pio_i2s_consumer_buffer_format = {
-        .format = &pio_i2s_consumer_format,
+    .format = &pio_i2s_consumer_format,
 };
 
 static audio_buffer_pool_t *audio_i2s_consumer;
 static audio_buffer_t silence_buffer;
+static bool audio_enabled;
 
 static void __isr __time_critical_func(audio_i2s_dma_irq_handler)();
 
@@ -128,19 +129,39 @@ void i2s_callback_loop()
 
 //void audio_i2s_end(const audio_i2s_config_t *config) {
 void audio_i2s_end() {
+    uint8_t dma_channel0 = shared_state.dma_channel0;
+    uint8_t dma_channel1 = shared_state.dma_channel1;
+    dma_channel_abort(dma_channel0);
+    dma_channel_abort(dma_channel1);
     audio_buffer_t *ab;
-    ab = get_full_audio_buffer(audio_i2s_consumer, false);
+    ab = take_audio_buffer(audio_i2s_consumer, false);
     while (ab != NULL) {
+        free(ab->buffer->bytes);
         free(ab->buffer);
-        ab = get_full_audio_buffer(audio_i2s_consumer, false);
+        ab = take_audio_buffer(audio_i2s_consumer, false);
     }
     ab = get_free_audio_buffer(audio_i2s_consumer, false);
     while (ab != NULL) {
+        free(ab->buffer->bytes);
         free(ab->buffer);
         ab = get_free_audio_buffer(audio_i2s_consumer, false);
     }
-    free(audio_i2s_consumer->free_list);
+    ab = get_full_audio_buffer(audio_i2s_consumer, false);
+    while (ab != NULL) {
+        free(ab->buffer->bytes);
+        free(ab->buffer);
+        ab = get_full_audio_buffer(audio_i2s_consumer, false);
+    }
+    if (shared_state.playing_buffer0 != NULL) {
+        free(shared_state.playing_buffer0->buffer->bytes);
+        free(shared_state.playing_buffer0->buffer);
+    }
+    if (shared_state.playing_buffer1 != NULL) {
+        free(shared_state.playing_buffer1->buffer->bytes);
+        free(shared_state.playing_buffer1->buffer);
+    }
     free(audio_i2s_consumer);
+    free(silence_buffer.buffer->bytes);
     free(silence_buffer.buffer);
     shared_state.playing_buffer0 = NULL;
     shared_state.playing_buffer1 = NULL;
@@ -149,8 +170,6 @@ void audio_i2s_end() {
     pio_sm_unclaim(audio_pio, sm);
     pio_remove_program(audio_pio, &audio_i2s_program, loaded_offset);
     pio_clear_instruction_memory(audio_pio);
-    uint8_t dma_channel0 = shared_state.dma_channel0;
-    uint8_t dma_channel1 = shared_state.dma_channel1;
     dma_channel_unclaim(dma_channel0);
     dma_channel_unclaim(dma_channel1);
     irq_remove_handler(DMA_IRQ_x, audio_i2s_dma_irq_handler);
@@ -189,9 +208,6 @@ const audio_format_t *audio_i2s_setup(const audio_format_t *i2s_input_audio_form
 
     shared_state.dma_channel0 = dma_channel0;
     shared_state.dma_channel1 = dma_channel1;
-
-    dma_config0 = dma_channel_get_default_config(dma_channel0);
-    dma_config1 = dma_channel_get_default_config(dma_channel1);
 
     enum dma_channel_transfer_size i2s_dma_configure_size;
     if (_i2s_output_audio_format->channel_count == AUDIO_CHANNEL_MONO) {
@@ -234,38 +250,46 @@ const audio_format_t *audio_i2s_setup(const audio_format_t *i2s_input_audio_form
                 break;
         }
     }
+    // DMA0
+    dma_config0 = dma_channel_get_default_config(dma_channel0);
     channel_config_set_transfer_data_size(&dma_config0, i2s_dma_configure_size);
     channel_config_set_read_increment(&dma_config0, true);
     channel_config_set_write_increment(&dma_config0, false);
     channel_config_set_dreq(&dma_config0, DREQ_PIOx_TX0 + sm);
     channel_config_set_chain_to(&dma_config0, dma_channel1);
-    dma_channel_configure(dma_channel0,
-                          &dma_config0,
-                          &audio_pio->txf[sm],  // dest
-                          NULL, // src
-                          0, // count
-                          false // trigger
+    dma_channel_configure(
+        dma_channel0,
+        &dma_config0,
+        &audio_pio->txf[sm], // dest
+        NULL, // src
+        0, // count
+        false // trigger
     );
+    // DMA1
+    dma_config1 = dma_channel_get_default_config(dma_channel1);
     channel_config_set_transfer_data_size(&dma_config1, i2s_dma_configure_size);
     channel_config_set_read_increment(&dma_config1, true);
     channel_config_set_write_increment(&dma_config1, false);
     channel_config_set_dreq(&dma_config1, DREQ_PIOx_TX0 + sm);
     channel_config_set_chain_to(&dma_config1, dma_channel0);
-    dma_channel_configure(dma_channel1,
-                          &dma_config1,
-                          &audio_pio->txf[sm],  // dest
-                          NULL, // src
-                          0, // count
-                          false // trigger
+    dma_channel_configure(
+        dma_channel1,
+        &dma_config1,
+        &audio_pio->txf[sm], // dest
+        NULL, // src
+        0, // count
+        false // trigger
     );
 
+    // DMA IRQ
     irq_add_shared_handler(DMA_IRQ_x, audio_i2s_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
     dma_channel_set_irqx_enabled(dma_channel0, 1);
     dma_channel_set_irqx_enabled(dma_channel1, 1);
+
     return _i2s_output_audio_format;
 }
 
-void update_pio_frequency(uint32_t sample_freq, audio_pcm_format_t pcm_format, audio_channel_t channel_count) {
+static void update_pio_frequency(uint32_t sample_freq, audio_pcm_format_t pcm_format, audio_channel_t channel_count) {
     printf("setting PIO freq for target sampling freq = %d Hz\n", (int) sample_freq);
     uint32_t system_clock_frequency = clock_get_hz(clk_sys);
     assert(system_clock_frequency < 0x40000000);
@@ -610,7 +634,7 @@ static inline void audio_start_dma_transfer(uint8_t dma_channel, dma_channel_con
     dma_channel_configure(
         dma_channel,
         dma_config,
-        &audio_pio->txf[shared_state.pio_sm],  // dest
+        &audio_pio->txf[shared_state.pio_sm], // dest
         ab->buffer->bytes, // src
         transfer_size, // count
         false // trigger
@@ -665,8 +689,6 @@ void __isr __time_critical_func(audio_i2s_dma_irq_handler)() {
 #endif
 }
 
-static bool audio_enabled;
-
 void audio_i2s_set_enabled(bool enabled) {
     if (enabled != audio_enabled) {
 #ifndef NDEBUG
@@ -683,9 +705,9 @@ void audio_i2s_set_enabled(bool enabled) {
             dma_intsx = 1u << dma_channel1;
         }
         irq_set_enabled(DMA_IRQ_x, enabled);
-        audio_start_dma_transfer(dma_channel0, &dma_config0, &shared_state.playing_buffer0);
-        audio_start_dma_transfer(dma_channel1, &dma_config1, &shared_state.playing_buffer1);
         if (enabled) {
+            audio_start_dma_transfer(dma_channel0, &dma_config0, &shared_state.playing_buffer0);
+            audio_start_dma_transfer(dma_channel1, &dma_config1, &shared_state.playing_buffer1);
             dma_channel_start(dma_channel0);
         }
 

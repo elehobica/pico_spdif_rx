@@ -381,6 +381,8 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
 
 void spdif_rx_end()
 {
+    dma_channel_abort(gcfg.dma_channel0);
+    dma_channel_abort(gcfg.dma_channel1);
     pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
     spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
     pio_remove_program(spdif_rx_pio, decode_pg.program, decode_pg.offset);

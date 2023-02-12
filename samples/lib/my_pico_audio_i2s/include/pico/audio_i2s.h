@@ -182,16 +182,6 @@ bool audio_i2s_connect_extra(audio_buffer_pool_t *producer, bool buffer_on_give,
  */
 void audio_i2s_set_enabled(bool enabled);
 
-
-/** \brief Update PIO frequency
- * \ingroup pico_audio_i2s
- *
- * \param samp_freq
- * \param pcm_format
- * \param channel_count
- */
-void update_pio_frequency(uint32_t sample_freq, audio_pcm_format_t pcm_format, audio_channel_t channel_count);
-
 #ifdef __cplusplus
 }
 #endif
