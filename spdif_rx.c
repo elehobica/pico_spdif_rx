@@ -16,7 +16,9 @@
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include "hardware/sync.h"
-#include "spdif_rx.pio.h"
+#include "spdif_rx_48000.pio.h"
+#include "spdif_rx_96000.pio.h"
+#include "spdif_rx_192000.pio.h"
 
 static spin_lock_t* spdif_rx_spin_lock;
 
@@ -60,12 +62,12 @@ typedef struct {
 } spdif_rx_pio_program_t;
 
 static spdif_rx_pio_program_t decode_sets[] = {
-    {&spdif_rx_48k_program,      0, spdif_rx_48k_offset_entry_point,      spdif_rx_48k_program_get_default_config},
-    {&spdif_rx_48k_inv_program,  0, spdif_rx_48k_inv_offset_entry_point,  spdif_rx_48k_inv_program_get_default_config},
-    {&spdif_rx_96k_program,      0, spdif_rx_96k_offset_entry_point,      spdif_rx_96k_program_get_default_config},
-    {&spdif_rx_96k_inv_program,  0, spdif_rx_96k_inv_offset_entry_point,  spdif_rx_96k_inv_program_get_default_config},
-    {&spdif_rx_192k_program,     0, spdif_rx_192k_offset_entry_point,     spdif_rx_192k_program_get_default_config},
-    {&spdif_rx_192k_inv_program, 0, spdif_rx_192k_inv_offset_entry_point, spdif_rx_192k_inv_program_get_default_config}
+    {&spdif_rx_48000_program,      0, spdif_rx_48000_offset_entry_point,      spdif_rx_48000_program_get_default_config},
+    {&spdif_rx_48000_inv_program,  0, spdif_rx_48000_inv_offset_entry_point,  spdif_rx_48000_inv_program_get_default_config},
+    {&spdif_rx_96000_program,      0, spdif_rx_96000_offset_entry_point,      spdif_rx_96000_program_get_default_config},
+    {&spdif_rx_96000_inv_program,  0, spdif_rx_96000_inv_offset_entry_point,  spdif_rx_96000_inv_program_get_default_config},
+    {&spdif_rx_192000_program,     0, spdif_rx_192000_offset_entry_point,     spdif_rx_192000_program_get_default_config},
+    {&spdif_rx_192000_inv_program, 0, spdif_rx_192000_inv_offset_entry_point, spdif_rx_192000_inv_program_get_default_config}
 };
 static const spdif_rx_samp_freq_t samp_freq_array[] = {
     SAMP_FREQ_44100,
@@ -116,6 +118,43 @@ static inline uint64_t _micros(void)
 static inline uint32_t _millis(void)
 {
 	return to_ms_since_boot(get_absolute_time());
+}
+
+static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint entry_point, pio_sm_config (*get_default_config)(uint), uint pin) {
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
+    pio_gpio_init(pio, pin);
+    gpio_pull_down(pin);
+
+    pio_sm_config sm_config = get_default_config(offset);
+
+    sm_config_set_jmp_pin(&sm_config, pin);
+    sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
+    sm_config_set_in_shift(&sm_config, true, false, 32); // shift_right, no autopush, 32bit
+
+    pio_sm_init(pio, sm, offset, &sm_config);
+    pio_sm_set_pins(pio, sm, 0); // clear pins
+
+    // set y, OSR (use as config value)
+    pio_sm_set_enabled(pio, sm, false);
+    pio_sm_put_blocking(pio, sm, 0x0); // y = 0x0
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false));
+    pio_sm_exec(pio, sm, pio_encode_out(pio_y, 32));
+    pio_sm_put_blocking(pio, sm, 0x3); // osr = 0x3
+    pio_sm_exec(pio, sm, pio_encode_pull(false, false)); // only pull to store to osr
+    pio_sm_set_enabled(pio, sm, true);
+
+    // fifo join needs to be done after pull/out
+    sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
+
+    pio_sm_exec(pio, sm, pio_encode_jmp(offset + entry_point));
+}
+
+static inline uint32_t spdif_rx_program_get32(PIO pio, uint sm) {
+    // 32-bit read from the FIFO
+    while (pio_sm_is_rx_fifo_empty(pio, sm)) {
+        tight_loop_contents();
+    }
+    return (uint32_t) pio->rxf[sm];
 }
 
 static inline uint32_t ptr_inc(uint32_t ptr, uint32_t count)
