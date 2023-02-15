@@ -96,7 +96,7 @@ static const char count_ones8[256] =
 	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
 	"\x04\x05\x05\x06\x05\x06\x06\x07\x05\x06\x06\x07\x06\x07\x07\x08";
 
-static int pio_program_id;
+static int pio_program_id = 0;
 static int block_count;
 static uint64_t prev_time;
 static uint64_t block_interval[NUM_AVE];
@@ -298,7 +298,10 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
 
 void spdif_rx_setup(const spdif_rx_config_t *config)
 {
-    pio_program_id = 0;
+    //pio_program_id = 0;
+    buff_wr_pre_ptr = 0;
+    buff_wr_done_ptr = 0;
+    buff_rd_ptr = 0;
     block_count = 0;
     block_aligned = false;
     block_align_count = 0;
@@ -310,7 +313,9 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
 
     spdif_rx_spin_lock = spin_lock_init(SPINLOCK_ID_AUDIO_FREE_LIST_LOCK);
 
-    memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
+    if (config != NULL) {
+        memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
+    }
     // === PIO configuration ===
     pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
     pio_sm_set_clkdiv(spdif_rx_pio, gcfg.pio_sm, 1);
@@ -383,10 +388,11 @@ void spdif_rx_end()
 {
     dma_channel_abort(gcfg.dma_channel0);
     dma_channel_abort(gcfg.dma_channel1);
-    pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
+    pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
     spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
     pio_remove_program(spdif_rx_pio, decode_pg.program, decode_pg.offset);
     pio_clear_instruction_memory(spdif_rx_pio);
+    pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
     dma_channel_unclaim(gcfg.dma_channel0);
     dma_channel_unclaim(gcfg.dma_channel1);
     irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
@@ -396,25 +402,9 @@ void spdif_rx_end()
 
 void spdif_rx_search_next()
 {
-    // Stop PIO
-    pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
-    pio_sm_clear_fifos(spdif_rx_pio, gcfg.pio_sm);
-    pio_clear_instruction_memory(spdif_rx_pio);
-    // Load another program and start
+    spdif_rx_end();
     pio_program_id = (pio_program_id + 1) % (sizeof(decode_sets) / sizeof(spdif_rx_pio_program_t));
-    spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
-    pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
-    decode_pg.offset = pio_add_program(spdif_rx_pio, decode_pg.program);
-    spdif_rx_program_init(
-        spdif_rx_pio,
-        gcfg.pio_sm,
-        decode_pg.offset,
-        decode_pg.entry_point,
-        decode_pg.get_default_config,
-        gcfg.data_pin
-    );
-    block_aligned = false;
-    parity_err_count = 0;
+    spdif_rx_setup(NULL);
 }
 
 bool spdif_rx_get_status()
