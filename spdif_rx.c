@@ -197,7 +197,7 @@ static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
             // C bits (heading 32bit only)
             if (i % 2 == 0 && i >= 0 && i < 64) { // using even sub frame of heading 32 frames of each block
                 uint32_t c_bit = ((buff[i] & (0x1<<30)) != 0x0) ? 0x1 : 0x0;
-                c_bits = (c_bits & (~(0x1 << (i/2)))) | (c_bit << (i/2));
+                c_bits = (c_bits & (~(0x1 << (i / 2)))) | (c_bit << (i / 2));
             }
             // Parity (27 bits of every sub frame)
             uint32_t count_ones32 = count_ones8[(buff[i]>>24) & 0x7f] + // exclueding P
@@ -220,7 +220,7 @@ static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
         if (pos_syncB != 0 && block_align_count == 0) {
             // dispose pos_syncB to align because fifo_buff[SPDIF_BLOCK_SIZE-1] was (SPDIF_BLOCK_SIZE - pos_syncB)'th sub frame
             // it takes 3 blocks to align because coming 2 transfers already issued
-            trans_count = pos_syncB;
+            trans_count = (pos_syncB > SPDIF_BLOCK_SIZE / 2) ? pos_syncB : SPDIF_BLOCK_SIZE / 2; // workaround: small number of trans_count can make DMA overun
             block_align_count = 3;
         } else {
             trans_count = SPDIF_BLOCK_SIZE;
@@ -260,7 +260,16 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
 
 // irq handler for DMA
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
+    bool proc_dma0 = false;
+    bool proc_dma1 = false;
     uint64_t now = _micros();
+    if ((dma_intsx & (1u << gcfg.dma_channel0))) {
+        dma_intsx = 1u << gcfg.dma_channel0;
+        proc_dma0 = true;
+    } else if ((dma_intsx & (1u << gcfg.dma_channel1))) {
+        dma_intsx = 1u << gcfg.dma_channel1;
+        proc_dma1 = true;
+    }
     { // Calculate samp_freq and check if it's stable
         block_interval[block_count % NUM_AVE] = now - prev_time;
         uint64_t accum = 0;
@@ -283,13 +292,10 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     }
     block_count++;
 
-    if ((dma_intsx & (1u << gcfg.dma_channel0))) {
-        dma_intsx = 1u << gcfg.dma_channel0;
+    if (proc_dma0) {
         uint32_t done_ptr = dma_done_and_restart(gcfg.dma_channel0, &dma_config0);
         checkBlock(to_buff_ptr(done_ptr));
-    }
-    if ((dma_intsx & (1u << gcfg.dma_channel1))) {
-        dma_intsx = 1u << gcfg.dma_channel1;
+    } else if (proc_dma1) {
         uint32_t done_ptr = dma_done_and_restart(gcfg.dma_channel1, &dma_config1);
         checkBlock(to_buff_ptr(done_ptr));
     }
