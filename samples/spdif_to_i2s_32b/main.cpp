@@ -38,7 +38,7 @@ static spdif_rx_config_t spdif_rx_config = {
     .pio_sm = 0,
     .dma_channel0 = 2,
     .dma_channel1 = 3,
-    .full_check = false
+    .full_check = true
 };
 
 static audio_i2s_config_t i2s_config = {
@@ -275,7 +275,9 @@ int main()
             if (!configured) {
                 uint32_t samp_freq = spdif_rx_get_samp_freq();
                 float samp_freq_actual = spdif_rx_get_samp_freq_actual();
+                uint32_t c_bits = spdif_rx_get_c_bits();
                 printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
+                printf("SPDIF C bits = 0x%08x\n", c_bits);
                 i2s_audio_init(samp_freq);
                 configured = true;
             }

@@ -47,7 +47,7 @@ typedef struct _spdif_rx_config_t {
     uint8_t pio_sm;
     uint8_t dma_channel0;
     uint8_t dma_channel1;
-    bool full_check; // if false, no C_bits info, no parity check, no callback, but fast processing
+    bool full_check; // if false, no C_bits info, no parity check, no callback, but light weight processing
 } spdif_rx_config_t;
 
 typedef enum _spdif_rx_samp_freq_t {
