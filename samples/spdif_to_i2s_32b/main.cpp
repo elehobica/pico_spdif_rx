@@ -80,6 +80,10 @@ void set_offset_clkdiv(clkdiv_speed_t speed)
 void i2s_audio_deinit()
 {
     decode_flg = false;
+
+    audio_i2s_set_enabled(false);
+    audio_i2s_end();
+
     audio_buffer_t* ab;
     ab = take_audio_buffer(ap, false);
     while (ab != nullptr) {
@@ -99,10 +103,6 @@ void i2s_audio_deinit()
         free(ab->buffer);
         ab = get_full_audio_buffer(ap, false);
     }
-
-    audio_i2s_set_enabled(false);
-    audio_i2s_end();
-
     free(ap);
     ap = nullptr;
 }
@@ -278,6 +278,9 @@ int main()
                 uint32_t c_bits = spdif_rx_get_c_bits();
                 printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
                 printf("SPDIF C bits = 0x%08x\n", c_bits);
+                if (ap != nullptr) {
+                    i2s_audio_deinit(); // deinit needs to be done when input is stable
+                }
                 i2s_audio_init(samp_freq);
                 configured = true;
             }
@@ -285,9 +288,6 @@ int main()
             if (now - last_trial > 200) { // to give a chance to stable decode for 200 ms until next try
                 if (configured) {
                     printf("stable sync not detected\n");
-                    if (ap != nullptr) {
-                        i2s_audio_deinit();
-                    }
                 }
                 spdif_rx_search_next();
                 last_trial = now;

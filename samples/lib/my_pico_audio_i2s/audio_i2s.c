@@ -60,7 +60,6 @@ audio_buffer_format_t pio_i2s_consumer_buffer_format = {
 
 static audio_buffer_pool_t *audio_i2s_consumer;
 static audio_buffer_t silence_buffer;
-static bool audio_enabled;
 
 static void __isr __time_critical_func(audio_i2s_dma_irq_handler)();
 
@@ -127,12 +126,7 @@ void i2s_callback_loop()
 }
 #endif // CORE1_PROCESS_I2S_CALLBACK
 
-//void audio_i2s_end(const audio_i2s_config_t *config) {
 void audio_i2s_end() {
-    uint8_t dma_channel0 = shared_state.dma_channel0;
-    uint8_t dma_channel1 = shared_state.dma_channel1;
-    dma_channel_abort(dma_channel0);
-    dma_channel_abort(dma_channel1);
     audio_buffer_t *ab;
     ab = take_audio_buffer(audio_i2s_consumer, false);
     while (ab != NULL) {
@@ -170,11 +164,6 @@ void audio_i2s_end() {
     pio_sm_unclaim(audio_pio, sm);
     pio_remove_program(audio_pio, &audio_i2s_program, loaded_offset);
     pio_clear_instruction_memory(audio_pio);
-    dma_channel_unclaim(dma_channel0);
-    dma_channel_unclaim(dma_channel1);
-    irq_remove_handler(DMA_IRQ_x, audio_i2s_dma_irq_handler);
-    dma_channel_set_irqx_enabled(dma_channel0, 0);
-    dma_channel_set_irqx_enabled(dma_channel1, 0);
 }
 
 const audio_format_t *audio_i2s_setup(const audio_format_t *i2s_input_audio_format, const audio_format_t *i2s_output_audio_format,
@@ -203,8 +192,6 @@ const audio_format_t *audio_i2s_setup(const audio_format_t *i2s_input_audio_form
     __mem_fence_release();
     uint8_t dma_channel0 = config->dma_channel0;
     uint8_t dma_channel1 = config->dma_channel1;
-    dma_channel_claim(dma_channel0);
-    dma_channel_claim(dma_channel1);
 
     shared_state.dma_channel0 = dma_channel0;
     shared_state.dma_channel1 = dma_channel1;
@@ -250,41 +237,20 @@ const audio_format_t *audio_i2s_setup(const audio_format_t *i2s_input_audio_form
                 break;
         }
     }
-    // DMA0
+    // DMA0 (configuration only)
     dma_config0 = dma_channel_get_default_config(dma_channel0);
     channel_config_set_transfer_data_size(&dma_config0, i2s_dma_configure_size);
     channel_config_set_read_increment(&dma_config0, true);
     channel_config_set_write_increment(&dma_config0, false);
     channel_config_set_dreq(&dma_config0, DREQ_PIOx_TX0 + sm);
     channel_config_set_chain_to(&dma_config0, dma_channel1);
-    dma_channel_configure(
-        dma_channel0,
-        &dma_config0,
-        &audio_pio->txf[sm], // dest
-        NULL, // src
-        0, // count
-        false // trigger
-    );
-    // DMA1
+    // DMA1 (configuration only)
     dma_config1 = dma_channel_get_default_config(dma_channel1);
     channel_config_set_transfer_data_size(&dma_config1, i2s_dma_configure_size);
     channel_config_set_read_increment(&dma_config1, true);
     channel_config_set_write_increment(&dma_config1, false);
     channel_config_set_dreq(&dma_config1, DREQ_PIOx_TX0 + sm);
     channel_config_set_chain_to(&dma_config1, dma_channel0);
-    dma_channel_configure(
-        dma_channel1,
-        &dma_config1,
-        &audio_pio->txf[sm], // dest
-        NULL, // src
-        0, // count
-        false // trigger
-    );
-
-    // DMA IRQ
-    irq_add_shared_handler(DMA_IRQ_x, audio_i2s_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
-    dma_channel_set_irqx_enabled(dma_channel0, 1);
-    dma_channel_set_irqx_enabled(dma_channel1, 1);
 
     return _i2s_output_audio_format;
 }
@@ -648,8 +614,17 @@ void __isr __time_critical_func(audio_i2s_dma_irq_handler)() {
 #else
     uint dma_channel0 = shared_state.dma_channel0;
     uint dma_channel1 = shared_state.dma_channel1;
+    bool proc_dma0 = false;
+    bool proc_dma1 = false;
     if (dma_intsx & (1u << dma_channel0)) {
         dma_intsx = 1u << dma_channel0;
+        proc_dma0 = true;
+    } else if (dma_intsx & (1u << dma_channel1)) {
+        dma_intsx = 1u << dma_channel1;
+        proc_dma1 = true;
+    }
+
+    if (proc_dma0) {
         DEBUG_PINS_SET(audio_timing, 4);
         // free the buffer we just finished
         if (shared_state.playing_buffer0) {
@@ -666,9 +641,7 @@ void __isr __time_critical_func(audio_i2s_dma_irq_handler)() {
         #else
         i2s_callback_func();
 #endif // CORE1_PROCESS_I2S_CALLBACK
-    }
-    if (dma_intsx & (1u << dma_channel1)) {
-        dma_intsx = 1u << dma_channel1;
+    } else if (proc_dma1) {
         DEBUG_PINS_SET(audio_timing, 4);
         // free the buffer we just finished
         if (shared_state.playing_buffer1) {
@@ -690,38 +663,49 @@ void __isr __time_critical_func(audio_i2s_dma_irq_handler)() {
 }
 
 void audio_i2s_set_enabled(bool enabled) {
-    if (enabled != audio_enabled) {
 #ifndef NDEBUG
-        if (enabled) {
-            printf("Enabling PIO I2S audio (on core %d)\n", get_core_num());
-        } else {
-            printf("Disabling PIO I2S audio (on core %d)\n", get_core_num());
-        }
+    if (enabled) {
+        printf("Enabling PIO I2S audio (on core %d)\n", get_core_num());
+    } else {
+        printf("Disabling PIO I2S audio (on core %d)\n", get_core_num());
+    }
 #endif
-        uint dma_channel0 = shared_state.dma_channel0;
-        uint dma_channel1 = shared_state.dma_channel1;
-        if (enabled) { // Clear pending before enabled
-            dma_intsx = 1u << dma_channel0;
-            dma_intsx = 1u << dma_channel1;
-        }
-        irq_set_enabled(DMA_IRQ_x, enabled);
-        if (enabled) {
-            audio_start_dma_transfer(dma_channel0, &dma_config0, &shared_state.playing_buffer0);
-            audio_start_dma_transfer(dma_channel1, &dma_config1, &shared_state.playing_buffer1);
-            dma_channel_start(dma_channel0);
-        }
+    uint dma_channel0 = shared_state.dma_channel0;
+    uint dma_channel1 = shared_state.dma_channel1;
 
+    if (enabled) {
+        dma_channel_claim(dma_channel0);
+        dma_channel_claim(dma_channel1);
+        // Clear pending before enabled
+        dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel0);
+        dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel1);
+        irq_add_shared_handler(DMA_IRQ_x, audio_i2s_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
+        dma_channel_set_irqx_enabled(dma_channel0, 1);
+        dma_channel_set_irqx_enabled(dma_channel1, 1);
+        irq_set_enabled(DMA_IRQ_x, 1);
+        audio_start_dma_transfer(dma_channel0, &dma_config0, &shared_state.playing_buffer0);
+        audio_start_dma_transfer(dma_channel1, &dma_config1, &shared_state.playing_buffer1);
+        dma_channel_start(dma_channel0);
 #ifdef CORE1_PROCESS_I2S_CALLBACK
-        bool flg;
-        uint32_t msg;
-        if (enabled) {
+        {
+            bool flg;
+            uint32_t msg;
             multicore_reset_core1();
             multicore_launch_core1(i2s_callback_loop);
             flg = multicore_fifo_pop_timeout_us(FIFO_TIMEOUT, &msg);
             if (!flg || msg != RESPONSE_CORE1_THREAD_STARTED) {
                 panic("Core1 is not respond\n");
             }
-        } else {
+            pio_sm_set_enabled(audio_pio, shared_state.pio_sm, enabled);
+        }
+#endif // CORE1_PROCESS_I2S_CALLBACK
+    } else {
+#ifdef CORE1_PROCESS_I2S_CALLBACK
+        {
+            bool flg;
+            uint32_t msg;
+            irq_set_enabled(DMA_IRQ_x, 0);
+            pio_sm_set_enabled(audio_pio, shared_state.pio_sm, 0);
             flg = multicore_fifo_push_timeout_us(NOTIFY_I2S_DISABLED, FIFO_TIMEOUT);
             if (!flg) { printf("Core0 -> Core1 FIFO Full\n"); }
             flg = multicore_fifo_pop_timeout_us(FIFO_TIMEOUT, &msg);
@@ -730,9 +714,14 @@ void audio_i2s_set_enabled(bool enabled) {
             }
         }
 #endif // CORE1_PROCESS_I2S_CALLBACK
-
-        pio_sm_set_enabled(audio_pio, shared_state.pio_sm, enabled);
-
-        audio_enabled = enabled;
+        dma_channel_set_irqx_enabled(dma_channel0, 0);
+        dma_channel_set_irqx_enabled(dma_channel1, 0);
+        dma_channel_abort(dma_channel0);
+        dma_channel_abort(dma_channel1);
+        dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel0);
+        dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel1);
+        dma_channel_unclaim(dma_channel0);
+        dma_channel_unclaim(dma_channel1);
+        irq_remove_handler(DMA_IRQ_x, audio_i2s_dma_irq_handler);
     }
 }
