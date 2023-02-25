@@ -3,7 +3,7 @@
 ## Overview
 * SPDIF receiver by rp2040 PIO function
 * format: 2ch, 16bit or 24bit
-* sampling frequency: 44.1 KHz, 48.0 KHz, 88.2 KHz, 96.0 KHz, 176.4 KHz, 192 KHz
+* sampling frequency: 44.1 KHz, 48.0 KHz, 88.2 KHz, 96.0 KHz, 176.4 KHz, 192.0 KHz
 * scanning function for all supported sampling frequencies
 
 ## Supported Board and Peripheral Devices

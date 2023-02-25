@@ -35,8 +35,6 @@ CU_REGISTER_DEBUG_PINS(audio_timing)
 #define GPIO_FUNC_PIOx __CONCAT(GPIO_FUNC_PIO, PICO_AUDIO_I2S_PIO)
 #define DREQ_PIOx_TX0 __CONCAT(__CONCAT(DREQ_PIO, PICO_AUDIO_I2S_PIO), _TX0)
 
-#define dma_intsx __CONCAT(dma_hw->ints, PICO_AUDIO_I2S_DMA_IRQ)
-#define dma_channel_set_irqx_enabled __CONCAT(__CONCAT(dma_channel_set_irq, PICO_AUDIO_I2S_DMA_IRQ),_enabled)
 #define DMA_IRQ_x __CONCAT(DMA_IRQ_, PICO_AUDIO_I2S_DMA_IRQ)
 
 static uint loaded_offset = 0;
@@ -614,17 +612,8 @@ void __isr __time_critical_func(audio_i2s_dma_irq_handler)() {
 #else
     uint dma_channel0 = shared_state.dma_channel0;
     uint dma_channel1 = shared_state.dma_channel1;
-    bool proc_dma0 = false;
-    bool proc_dma1 = false;
-    if (dma_intsx & (1u << dma_channel0)) {
-        dma_intsx = 1u << dma_channel0;
-        proc_dma0 = true;
-    } else if (dma_intsx & (1u << dma_channel1)) {
-        dma_intsx = 1u << dma_channel1;
-        proc_dma1 = true;
-    }
-
-    if (proc_dma0) {
+    if (dma_irqn_get_channel_status(PICO_AUDIO_I2S_DMA_IRQ, dma_channel0)) {
+        dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel0);
         DEBUG_PINS_SET(audio_timing, 4);
         // free the buffer we just finished
         if (shared_state.playing_buffer0) {
@@ -641,7 +630,8 @@ void __isr __time_critical_func(audio_i2s_dma_irq_handler)() {
         #else
         i2s_callback_func();
 #endif // CORE1_PROCESS_I2S_CALLBACK
-    } else if (proc_dma1) {
+    } else if (dma_irqn_get_channel_status(PICO_AUDIO_I2S_DMA_IRQ, dma_channel1)) {
+        dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel1);
         DEBUG_PINS_SET(audio_timing, 4);
         // free the buffer we just finished
         if (shared_state.playing_buffer1) {
@@ -680,9 +670,9 @@ void audio_i2s_set_enabled(bool enabled) {
         dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel0);
         dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel1);
         irq_add_shared_handler(DMA_IRQ_x, audio_i2s_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
-        dma_channel_set_irqx_enabled(dma_channel0, 1);
-        dma_channel_set_irqx_enabled(dma_channel1, 1);
-        irq_set_enabled(DMA_IRQ_x, 1);
+        dma_irqn_set_channel_enabled(PICO_AUDIO_I2S_DMA_IRQ, dma_channel0, true);
+        dma_irqn_set_channel_enabled(PICO_AUDIO_I2S_DMA_IRQ, dma_channel1, true);
+        irq_set_enabled(DMA_IRQ_x, true);
         audio_start_dma_transfer(dma_channel0, &dma_config0, &shared_state.playing_buffer0);
         audio_start_dma_transfer(dma_channel1, &dma_config1, &shared_state.playing_buffer1);
         dma_channel_start(dma_channel0);
@@ -704,8 +694,8 @@ void audio_i2s_set_enabled(bool enabled) {
         {
             bool flg;
             uint32_t msg;
-            irq_set_enabled(DMA_IRQ_x, 0);
-            pio_sm_set_enabled(audio_pio, shared_state.pio_sm, 0);
+            irq_set_enabled(DMA_IRQ_x, false);
+            pio_sm_set_enabled(audio_pio, shared_state.pio_sm, false);
             flg = multicore_fifo_push_timeout_us(NOTIFY_I2S_DISABLED, FIFO_TIMEOUT);
             if (!flg) { printf("Core0 -> Core1 FIFO Full\n"); }
             flg = multicore_fifo_pop_timeout_us(FIFO_TIMEOUT, &msg);
@@ -714,8 +704,8 @@ void audio_i2s_set_enabled(bool enabled) {
             }
         }
 #endif // CORE1_PROCESS_I2S_CALLBACK
-        dma_channel_set_irqx_enabled(dma_channel0, 0);
-        dma_channel_set_irqx_enabled(dma_channel1, 0);
+        dma_irqn_set_channel_enabled(PICO_AUDIO_I2S_DMA_IRQ, dma_channel0, false);
+        dma_irqn_set_channel_enabled(PICO_AUDIO_I2S_DMA_IRQ, dma_channel1, false);
         dma_channel_abort(dma_channel0);
         dma_channel_abort(dma_channel1);
         dma_irqn_acknowledge_channel(PICO_AUDIO_I2S_DMA_IRQ, dma_channel0);

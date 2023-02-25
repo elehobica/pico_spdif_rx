@@ -34,8 +34,6 @@ dma_channel_config dma_config1;
 #define spdif_rx_pio __CONCAT(pio, PICO_SPDIF_RX_PIO)
 #define DREQ_PIOx_RX0 __CONCAT(__CONCAT(DREQ_PIO, PICO_SPDIF_RX_PIO), _RX0)
 
-#define dma_intsx __CONCAT(dma_hw->ints, PICO_SPDIF_RX_DMA_IRQ)
-#define dma_channel_set_irqx_enabled __CONCAT(__CONCAT(dma_channel_set_irq, PICO_SPDIF_RX_DMA_IRQ),_enabled)
 #define DMA_IRQ_x __CONCAT(DMA_IRQ_, PICO_SPDIF_RX_DMA_IRQ)
 
 #define SYNC_B 0b1111
@@ -263,11 +261,11 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     bool proc_dma0 = false;
     bool proc_dma1 = false;
     uint64_t now = _micros();
-    if ((dma_intsx & (1u << gcfg.dma_channel0))) {
-        dma_intsx = 1u << gcfg.dma_channel0;
+    if (dma_irqn_get_channel_status(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0)) {
+        dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0);
         proc_dma0 = true;
-    } else if ((dma_intsx & (1u << gcfg.dma_channel1))) {
-        dma_intsx = 1u << gcfg.dma_channel1;
+    } else if (dma_irqn_get_channel_status(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1)) {
+        dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1);
         proc_dma1 = true;
     }
     { // Calculate samp_freq and check if it's stable
@@ -370,9 +368,9 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     // DMA IRQ
     irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
     //irq_add_shared_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler, 0xff); // highest
-    dma_channel_set_irqx_enabled(gcfg.dma_channel0, 1);
-    dma_channel_set_irqx_enabled(gcfg.dma_channel1, 1);
-    irq_set_enabled(DMA_IRQ_x, 1);
+    dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0, true);
+    dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1, true);
+    irq_set_enabled(DMA_IRQ_x, true);
 
     // Start DMA
     dma_channel_start(gcfg.dma_channel0);
@@ -402,8 +400,8 @@ void spdif_rx_end()
     dma_channel_unclaim(gcfg.dma_channel0);
     dma_channel_unclaim(gcfg.dma_channel1);
     irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
-    dma_channel_set_irqx_enabled(gcfg.dma_channel0, 0);
-    dma_channel_set_irqx_enabled(gcfg.dma_channel1, 0);
+    dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0, false);
+    dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1, false);
 }
 
 void spdif_rx_search_next()
