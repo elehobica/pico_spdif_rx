@@ -158,6 +158,8 @@ static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
 {
     uint pos_syncB = 0;
     uint32_t block_parity_err_count = 0;
+    uint32_t block_cbits = 0;
+    uint32_t cbit_mask = 0x1; // start with LSB
 
     for (int i = 0; i < SPDIF_BLOCK_SIZE; i++) {
         uint32_t sync = buff[i] & 0xf;
@@ -175,9 +177,11 @@ static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
             }
             // VUCP handling
             // C bits (heading 32bit only)
-            if (i % 2 == 0 && i >= 0 && i < 64) { // using even sub frame of heading 32 frames of each block
-                uint32_t c_bit = ((buff[i] & (0x1<<30)) != 0x0) ? 0x1 : 0x0;
-                c_bits = (c_bits & (~(0x1 << (i / 2)))) | (c_bit << (i / 2));
+            if (i % 2 == 0 && cbit_mask) { // using even sub frame of heading 32 frames of each block
+                if (buff[i] & (0x1<<30)) {
+                    block_cbits |= cbit_mask;
+                }
+                cbit_mask <<= 1; // will become 0 after 32 bits are collected, and stop the if()
             }
 
             // Parity (27 bits of every sub frame)
@@ -194,6 +198,7 @@ static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
     parity_err_count += block_parity_err_count;
     // block align adjustment
     if (block_aligned) {
+        c_bits = block_cbits; // copy what's been collected
         trans_count = SPDIF_BLOCK_SIZE;
         if (spdif_rx_get_samp_freq() != SAMP_FREQ_NONE) {
             spdif_rx_callback_func(buff, trans_count, c_bits, block_parity_err_count > 0);
