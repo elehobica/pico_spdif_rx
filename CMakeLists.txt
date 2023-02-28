@@ -24,10 +24,13 @@ if (NOT TARGET spdif_rx)
             ${CMAKE_CURRENT_LIST_DIR}/spdif_rx.c
     )
 
-    target_include_directories(spdif_rx INTERFACE ${CMAKE_CURRENT_LIST_DIR}/..)
+    target_include_directories(spdif_rx INTERFACE
+        ${CMAKE_CURRENT_LIST_DIR}
+    )
+
     target_link_libraries(spdif_rx INTERFACE
         pico_stdlib
-        pico_multicore
+        #pico_multicore
         hardware_dma
         hardware_pio
         hardware_irq
