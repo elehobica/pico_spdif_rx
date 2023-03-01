@@ -144,7 +144,7 @@ static inline uint32_t ptr_inc(uint32_t ptr, uint32_t count)
 
 static inline uint32_t* to_buff_ptr(uint32_t ptr)
 {
-    return fifo_buff + ptr % SPDIF_RX_FIFO_SIZE;
+    return &fifo_buff[ptr % SPDIF_RX_FIFO_SIZE];
 }
 
 // default spdif_rx block callback function (you may override at external)
@@ -154,7 +154,7 @@ void spdif_rx_callback_func(uint32_t *buff, uint32_t sub_frame_count, uint32_t c
     return;
 }
 
-static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
+static int check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
 {
     uint pos_syncB = 0;
     uint32_t block_parity_err_count = 0;
@@ -281,10 +281,10 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
 
     if (proc_dma0) {
         uint32_t done_ptr = dma_done_and_restart(gcfg.dma_channel0, &dma_config0);
-        checkBlock(to_buff_ptr(done_ptr));
+        check_block(to_buff_ptr(done_ptr));
     } else if (proc_dma1) {
         uint32_t done_ptr = dma_done_and_restart(gcfg.dma_channel1, &dma_config1);
-        checkBlock(to_buff_ptr(done_ptr));
+        check_block(to_buff_ptr(done_ptr));
     }
     prev_time = now;
 }

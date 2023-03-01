@@ -50,7 +50,7 @@
 
 ## Decode output format
 * 32bit output for each SPDIF sub frame including header, audio data, AUX, VUCP
-* see comments in [spdif_rx.pio](spdif_rx/spdif_rx.pio) for further detail
+* see comments in [spdif_rx.pio](spdif_rx.pio) for further detail
 
 ## Sample projects
 ### detect_samp_freq
