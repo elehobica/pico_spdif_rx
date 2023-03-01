@@ -1,10 +1,9 @@
 cmake_minimum_required(VERSION 3.12)
 
-set(PICO_SDK_PATH ${CMAKE_CURRENT_LIST_DIR}/../../../pico-sdk)
-include(../pico_sdk_import.cmake)
-include(../pico_extras_import.cmake)
+include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
+include($ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 
-set(project_name "pico_spdif_rx" C CXX ASM)
+set(project_name "spdif_to_i2s_32b" C CXX ASM)
 project(${project_name})
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
@@ -12,27 +11,19 @@ set(CMAKE_CXX_STANDARD 17)
 pico_sdk_init()
 
 add_subdirectory(../.. spdif_rx)
-add_subdirectory(../lib/my_pico_audio my_pico_audio)
+add_subdirectory(../lib/my_pico_audio my_pico_audio) # for extended audio.h
 add_subdirectory(../lib/my_pico_audio_i2s my_pico_audio_i2s)
 
-set(bin_name "pico_spdif_rx")
-
 # select sample application here (choose only one)
-add_executable(${bin_name}
+add_executable(${PROJECT_NAME}
     main.cpp
 )
 
-target_link_libraries(${bin_name}
+target_link_libraries(${PROJECT_NAME}
     pico_stdlib
     spdif_rx
     my_pico_audio
     my_pico_audio_i2s
 )
 
-target_include_directories(${bin_name} PRIVATE ../../)
-
-target_compile_definitions(${bin_name} PRIVATE
-    #define for our example code
-)
-
-pico_add_extra_outputs(${bin_name})
+pico_add_extra_outputs(${PROJECT_NAME}) # create map/bin/hex/uf2 files
