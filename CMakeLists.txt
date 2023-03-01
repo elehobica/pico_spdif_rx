@@ -21,7 +21,7 @@ if (NOT TARGET spdif_rx)
     )
 
     target_sources(spdif_rx INTERFACE
-            ${CMAKE_CURRENT_LIST_DIR}/spdif_rx.c
+        ${CMAKE_CURRENT_LIST_DIR}/spdif_rx.c
     )
 
     target_include_directories(spdif_rx INTERFACE
@@ -30,7 +30,6 @@ if (NOT TARGET spdif_rx)
 
     target_link_libraries(spdif_rx INTERFACE
         pico_stdlib
-        #pico_multicore
         hardware_dma
         hardware_pio
         hardware_irq

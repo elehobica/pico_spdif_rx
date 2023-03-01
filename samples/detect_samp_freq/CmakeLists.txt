@@ -12,7 +12,6 @@ pico_sdk_init()
 
 add_subdirectory(../.. spdif_rx)
 add_subdirectory(../lib/my_pico_audio my_pico_audio) # for extended audio.h
-#add_subdirectory(../lib/my_pico_audio_i2s my_pico_audio_i2s)
 
 # select sample application here (choose only one)
 add_executable(${PROJECT_NAME}
@@ -22,15 +21,6 @@ add_executable(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     pico_stdlib
     spdif_rx
-    #my_pico_audio
-    #my_pico_audio_i2s
-)
-
-target_include_directories(${PROJECT_NAME} PRIVATE
-)
-
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-    #define for our example code
 )
 
 pico_add_extra_outputs(${PROJECT_NAME}) # create map/bin/hex/uf2 files
