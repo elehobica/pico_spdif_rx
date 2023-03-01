@@ -76,24 +76,6 @@ static const spdif_rx_samp_freq_t samp_freq_array[] = {
     SAMP_FREQ_192000
 };
 
-static const char count_ones8[256] =
-	"\x00\x01\x01\x02\x01\x02\x02\x03\x01\x02\x02\x03\x02\x03\x03\x04"
-	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
-	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
-	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
-	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
-	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
-	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
-	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
-	"\x01\x02\x02\x03\x02\x03\x03\x04\x02\x03\x03\x04\x03\x04\x04\x05"
-	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
-	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
-	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
-	"\x02\x03\x03\x04\x03\x04\x04\x05\x03\x04\x04\x05\x04\x05\x05\x06"
-	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
-	"\x03\x04\x04\x05\x04\x05\x05\x06\x04\x05\x05\x06\x05\x06\x06\x07"
-	"\x04\x05\x05\x06\x05\x06\x06\x07\x05\x06\x06\x07\x06\x07\x07\x08";
-
 static int pio_program_id = 0;
 static int block_count;
 static uint64_t prev_time;
@@ -176,6 +158,8 @@ static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
 {
     uint pos_syncB = 0;
     uint32_t block_parity_err_count = 0;
+    uint32_t block_cbits = 0;
+    uint32_t cbit_mask = 0x1; // start with LSB
 
     for (int i = 0; i < SPDIF_BLOCK_SIZE; i++) {
         uint32_t sync = buff[i] & 0xf;
@@ -193,16 +177,20 @@ static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
             }
             // VUCP handling
             // C bits (heading 32bit only)
-            if (i % 2 == 0 && i >= 0 && i < 64) { // using even sub frame of heading 32 frames of each block
-                uint32_t c_bit = ((buff[i] & (0x1<<30)) != 0x0) ? 0x1 : 0x0;
-                c_bits = (c_bits & (~(0x1 << (i / 2)))) | (c_bit << (i / 2));
+            if (i % 2 == 0 && cbit_mask) { // using even sub frame of heading 32 frames of each block
+                if (buff[i] & (0x1<<30)) {
+                    block_cbits |= cbit_mask;
+                }
+                cbit_mask <<= 1; // will become 0 after 32 bits are collected, and stop the if()
             }
+
             // Parity (27 bits of every sub frame)
-            uint32_t count_ones32 = count_ones8[(buff[i]>>24) & 0x7f] + // exclueding P
-                                    count_ones8[(buff[i]>>16) & 0xff] +
-                                    count_ones8[(buff[i]>> 8) & 0xff] +
-                                    count_ones8[(buff[i]>> 0) & 0xf0];  // excluding sync
-            if ((count_ones32 & 0x1) != (buff[i] >> 31)) {
+            uint32_t v = buff[i] & 0x7FFFFFF0; // excluding P and sync
+            v ^= v >> 1;
+            v ^= v >> 2;
+            v = (v & 0x11111111) * 0x11111111; // bithacks trick, faster than __builtin_parity()
+            v = (v << (31-28)); // parity is now in bit 28, move to bit 31
+            if ((v ^ buff[i]) & (1<<31)) {
                 block_parity_err_count++;
             }
         }
@@ -210,6 +198,7 @@ static int checkBlock(uint32_t buff[SPDIF_BLOCK_SIZE])
     parity_err_count += block_parity_err_count;
     // block align adjustment
     if (block_aligned) {
+        c_bits = block_cbits; // copy what's been collected
         trans_count = SPDIF_BLOCK_SIZE;
         if (spdif_rx_get_samp_freq() != SAMP_FREQ_NONE) {
             spdif_rx_callback_func(buff, trans_count, c_bits, block_parity_err_count > 0);
