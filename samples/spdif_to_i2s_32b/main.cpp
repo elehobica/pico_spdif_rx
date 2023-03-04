@@ -264,46 +264,47 @@ int main()
     gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
     gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWM mode for less Audio noise
 
-    spdif_rx_setup(&spdif_rx_config);
-    printf("spdif_rx setup done\n");
-
+    spdif_rx_samp_freq_t samp_freq = SAMP_FREQ_NONE;
+    bool is_inv = false;
     bool configured = false;
-    uint32_t last_trial = 0;
+
     while (true) {
-        uint32_t now = _millis();
-        if (spdif_rx_get_status()) {
-            if (!configured) {
-                uint32_t samp_freq = spdif_rx_get_samp_freq();
-                float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-                uint32_t c_bits = spdif_rx_get_c_bits();
-                printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
-                printf("SPDIF C bits = 0x%08x\n", c_bits);
-                if (ap != nullptr) {
-                    i2s_audio_deinit(); // deinit needs to be done when input is stable
+        int flag = spdif_rx_detect(&spdif_rx_config, &samp_freq, &is_inv);
+        if (flag) {
+            printf("detected\n");
+            spdif_rx_setup(&spdif_rx_config, samp_freq, is_inv);
+            printf("setup done\n");
+            sleep_ms(300); // to give a chance to stable decode
+            while (spdif_rx_get_status()) {
+                if (!configured) {
+                    uint32_t samp_freq = spdif_rx_get_samp_freq();
+                    float samp_freq_actual = spdif_rx_get_samp_freq_actual();
+                    uint32_t c_bits = spdif_rx_get_c_bits();
+                    printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
+                    printf("SPDIF C bits = 0x%08x\n", c_bits);
+                    if (ap != nullptr) {
+                        i2s_audio_deinit(); // deinit needs to be done when input is stable
+                    }
+                    i2s_audio_init(samp_freq);
+                    configured = true;
                 }
-                i2s_audio_init(samp_freq);
-                configured = true;
-            }
-        } else {
-            if (now - last_trial > 200) { // to give a chance to stable decode for 200 ms until next try
-                if (configured) {
-                    printf("stable sync not detected\n");
+                int c = getchar_timeout_us(0);
+                if (c) {
+                    if (c == '-' && volume > 0) {
+                        volume--;
+                    } else if ((c == '=' || c == '+') && volume < 256) {
+                        volume++;
+                    }
                 }
-                spdif_rx_search_next();
-                last_trial = now;
-                configured = false;
+                tight_loop_contents();
+                sleep_ms(10);
             }
-        }
-        int c = getchar_timeout_us(0);
-        if (c) {
-            if (c == '-' && volume > 0) {
-                volume--;
-            } else if ((c == '=' || c == '+') && volume < 256) {
-                volume++;
-            }
+            spdif_rx_end();
+            configured = false;
+            printf("stable sync not detected\n");
         }
         tight_loop_contents();
-        sleep_ms(10);
+        sleep_ms(1);
     }
 
     return 0;

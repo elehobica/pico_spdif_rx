@@ -1,0 +1,23 @@
+; Copyright (c) 2023, Elehobica
+; Released under the BSD-2-Clause
+; refer to https://opensource.org/licenses/BSD-2-Clause
+
+.program spdif_rx_detect
+
+public entry_point:
+    set x, 31
+; block here if no signal
+loop_wait_toggle:
+    wait 0 pin 0
+    wait 1 pin 0
+    jmp x-- loop_wait_toggle
+
+; one more wait turn to avoid spending 1 cyc by jmp
+    wait 0 pin 0
+    wait 1 pin 0
+; here just after rising edge of pin
+
+; output samples non-stop unless fifo gets full
+.wrap_target
+    in pins, 1
+.wrap

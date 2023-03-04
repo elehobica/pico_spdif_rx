@@ -56,12 +56,12 @@ typedef enum _spdif_rx_samp_freq_t {
 #define NUM_BLOCKS (8) // must be >= 2
 #define SPDIF_RX_FIFO_SIZE (NUM_BLOCKS * SPDIF_BLOCK_SIZE)
 
-void spdif_rx_setup(const spdif_rx_config_t *config);
+int spdif_rx_detect(const spdif_rx_config_t *config, spdif_rx_samp_freq_t *samp_freq, bool *is_inv);
+void spdif_rx_setup(const spdif_rx_config_t *config, spdif_rx_samp_freq_t samp_freq, bool is_inv);
 void spdif_rx_end();
 bool spdif_rx_get_status();
 float spdif_rx_get_samp_freq_actual();
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq();
-void spdif_rx_search_next();
 uint32_t spdif_rx_get_c_bits();
 uint32_t spdif_rx_get_parity_err_count();
 uint32_t spdif_rx_get_fifo_count();
