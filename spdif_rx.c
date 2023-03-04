@@ -110,31 +110,20 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint ent
     sm_config_set_jmp_pin(&sm_config, pin);
     sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
     sm_config_set_in_shift(&sm_config, true, false, 32); // shift_right, no autopush, 32bit
+    sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
+    sm_config_set_clkdiv(&sm_config, 1);
 
     pio_sm_init(pio, sm, offset, &sm_config);
     pio_sm_set_pins(pio, sm, 0); // clear pins
 
-    // set y, OSR (use as config value)
+    // set y, OSR (use as fixed value)
     pio_sm_set_enabled(pio, sm, false);
-    pio_sm_put_blocking(pio, sm, 0x0); // y = 0x0
-    pio_sm_exec(pio, sm, pio_encode_pull(false, false));
-    pio_sm_exec(pio, sm, pio_encode_out(pio_y, 32));
-    pio_sm_put_blocking(pio, sm, 0x3); // osr = 0x3
-    pio_sm_exec(pio, sm, pio_encode_pull(false, false)); // only pull to store to osr
+    pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0x3));
+    pio_sm_exec(pio, sm, pio_encode_mov(pio_osr, pio_y)); // osr = 0x3
+    pio_sm_exec(pio, sm, pio_encode_set(pio_y, 0x0)); // y = 0x0
     pio_sm_set_enabled(pio, sm, true);
 
-    // fifo join needs to be done after pull/out
-    sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
-
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + entry_point));
-}
-
-static inline uint32_t spdif_rx_program_get32(PIO pio, uint sm) {
-    // 32-bit read from the FIFO
-    while (pio_sm_is_rx_fifo_empty(pio, sm)) {
-        tight_loop_contents();
-    }
-    return (uint32_t) pio->rxf[sm];
 }
 
 static inline uint32_t ptr_inc(uint32_t ptr, uint32_t count)
@@ -311,7 +300,6 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     }
     // === PIO configuration ===
     pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
-    pio_sm_set_clkdiv(spdif_rx_pio, gcfg.pio_sm, 1);
 
     // === DMA configuration ===
     __mem_fence_release();

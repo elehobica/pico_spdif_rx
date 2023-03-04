@@ -17,12 +17,8 @@ extern "C" {
 #define PICO_SPDIF_RX_DMA_IRQ 0
 #endif
 
-#ifndef PICO_SPDIF_RX_PIO0
-#define PICO_SPDIF_RX_PIO0 0
-#endif
-
-#ifndef PICO_SPDIF_RX_PIO1
-#define PICO_SPDIF_RX_PIO1 1
+#ifndef PICO_SPDIF_RX_PIO
+#define PICO_SPDIF_RX_PIO 0
 #endif
 
 // PICO_CONFIG: SPINLOCK_ID_SPDIF_RX_PREPARED_LISTS_LOCK, Spinlock number for the audio prepared list, min=0, max=31, default=8, group=audio
@@ -34,12 +30,8 @@ extern "C" {
 #error PICO_SPDIF_RX_DMA_IRQ must be 0 or 1
 #endif
 
-#if !(PICO_SPDIF_RX_PIO0 == 0 || PICO_SPDIF_RX_PIO0 == 1)
-#error PICO_SPDIF_RX_PIO0 ust be 0 or 1
-#endif
-
-#if !(PICO_SPDIF_RX_PIO0 == 1 || PICO_SPDIF_RX_PIO1 == 1)
-#error PICO_SPDIF_RX_PIO1 ust be 0 or 1
+#if !(PICO_SPDIF_RX_PIO == 0 || PICO_SPDIF_RX_PIO == 1)
+#error PICO_SPDIF_RX_PIO ust be 0 or 1
 #endif
 
 typedef struct _spdif_rx_config_t {
