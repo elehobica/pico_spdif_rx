@@ -16,6 +16,7 @@
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include "hardware/sync.h"
+#include "spdif_rx_detect.pio.h"
 #include "spdif_rx_48000.pio.h"
 #include "spdif_rx_96000.pio.h"
 #include "spdif_rx_192000.pio.h"
@@ -30,6 +31,10 @@ static uint32_t buff_count;
 
 dma_channel_config dma_config0;
 dma_channel_config dma_config1;
+
+#define SYSTEM_CLK_FREQUENCY (125000000)
+// sample words to detect is equivalent to 64*4+8 symbols (1 frame + sync) at 44.1 KHz @ 125 MHz clock
+#define SPDIF_RX_DETECT_SIZE (((SYSTEM_CLK_FREQUENCY / SAMP_FREQ_44100 / 128 + 1) * (64 * 4 + 8) + 31) / 32)
 
 #define spdif_rx_pio __CONCAT(pio, PICO_SPDIF_RX_PIO)
 #define DREQ_PIOx_RX0 __CONCAT(__CONCAT(DREQ_PIO, PICO_SPDIF_RX_PIO), _RX0)
@@ -52,7 +57,17 @@ static audio_format_t audio_format = {
     .channel_count = AUDIO_CHANNEL_STEREO
 };
 
+typedef enum _spdif_rx_pio_program_id_t  {
+    SPDIF_RX_PIO_PROG_48000 = 0,
+    SPDIF_RX_PIO_PROG_48000_INV,
+    SPDIF_RX_PIO_PROG_96000,
+    SPDIF_RX_PIO_PROG_96000_INV,
+    SPDIF_RX_PIO_PROG_192000,
+    SPDIF_RX_PIO_PROG_192000_INV
+} spdif_rx_pio_program_id_t;
+
 typedef struct {
+    const spdif_rx_pio_program_id_t id;
     const pio_program_t *program;
     uint offset;
     uint entry_point;
@@ -60,13 +75,14 @@ typedef struct {
 } spdif_rx_pio_program_t;
 
 static spdif_rx_pio_program_t decode_sets[] = {
-    {&spdif_rx_48000_program,      0, spdif_rx_48000_offset_entry_point,      spdif_rx_48000_program_get_default_config},
-    {&spdif_rx_48000_inv_program,  0, spdif_rx_48000_inv_offset_entry_point,  spdif_rx_48000_inv_program_get_default_config},
-    {&spdif_rx_96000_program,      0, spdif_rx_96000_offset_entry_point,      spdif_rx_96000_program_get_default_config},
-    {&spdif_rx_96000_inv_program,  0, spdif_rx_96000_inv_offset_entry_point,  spdif_rx_96000_inv_program_get_default_config},
-    {&spdif_rx_192000_program,     0, spdif_rx_192000_offset_entry_point,     spdif_rx_192000_program_get_default_config},
-    {&spdif_rx_192000_inv_program, 0, spdif_rx_192000_inv_offset_entry_point, spdif_rx_192000_inv_program_get_default_config}
+    {SPDIF_RX_PIO_PROG_48000,      &spdif_rx_48000_program,      0, spdif_rx_48000_offset_entry_point,      spdif_rx_48000_program_get_default_config},
+    {SPDIF_RX_PIO_PROG_48000_INV,  &spdif_rx_48000_inv_program,  0, spdif_rx_48000_inv_offset_entry_point,  spdif_rx_48000_inv_program_get_default_config},
+    {SPDIF_RX_PIO_PROG_96000,      &spdif_rx_96000_program,      0, spdif_rx_96000_offset_entry_point,      spdif_rx_96000_program_get_default_config},
+    {SPDIF_RX_PIO_PROG_96000_INV,  &spdif_rx_96000_inv_program,  0, spdif_rx_96000_inv_offset_entry_point,  spdif_rx_96000_inv_program_get_default_config},
+    {SPDIF_RX_PIO_PROG_192000,     &spdif_rx_192000_program,     0, spdif_rx_192000_offset_entry_point,     spdif_rx_192000_program_get_default_config},
+    {SPDIF_RX_PIO_PROG_192000_INV, &spdif_rx_192000_inv_program, 0, spdif_rx_192000_inv_offset_entry_point, spdif_rx_192000_inv_program_get_default_config}
 };
+
 static const spdif_rx_samp_freq_t samp_freq_array[] = {
     SAMP_FREQ_44100,
     SAMP_FREQ_48000,
@@ -76,9 +92,13 @@ static const spdif_rx_samp_freq_t samp_freq_array[] = {
     SAMP_FREQ_192000
 };
 
+static bool setup_done = false;
+static bool stable_done = false;
+static bool stable_lost = false;
 static int pio_program_id = 0;
 static int block_count;
-static uint64_t prev_time;
+static uint64_t prev_time = 0;
+static uint64_t prev_time32 = 0;
 static uint64_t block_interval[NUM_AVE];
 static bool block_aligned;
 static int block_align_count;
@@ -92,12 +112,12 @@ static uint32_t parity_err_count;
 
 static inline uint64_t _micros(void)
 {
-	return to_us_since_boot(get_absolute_time());
+    return to_us_since_boot(get_absolute_time());
 }
 
 static inline uint32_t _millis(void)
 {
-	return to_ms_since_boot(get_absolute_time());
+    return to_ms_since_boot(get_absolute_time());
 }
 
 static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint entry_point, pio_sm_config (*get_default_config)(uint), uint pin) {
@@ -234,6 +254,32 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
     return done_ptr;
 }
 
+static int spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool inverted)
+{
+    int pio_program_id = 0;
+    switch (samp_freq) {
+        case SAMP_FREQ_44100: // fallthrough
+        case SAMP_FREQ_48000:
+            pio_program_id = SPDIF_RX_PIO_PROG_48000;
+            break;
+        case SAMP_FREQ_88200: // fallthrough
+        case SAMP_FREQ_96000:
+            pio_program_id = SPDIF_RX_PIO_PROG_96000;
+            break;
+        case SAMP_FREQ_176400: // fallthrough
+        case SAMP_FREQ_192000:
+            pio_program_id = SPDIF_RX_PIO_PROG_192000;
+            break;
+        default:
+            pio_program_id = SPDIF_RX_PIO_PROG_48000;
+            break;
+    }
+    if (inverted) {
+        pio_program_id++;
+    }
+    return pio_program_id;
+}
+
 // irq handler for DMA
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     bool proc_dma0 = false;
@@ -262,8 +308,15 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
                 break;
             }
         }
-        stable_freq_history = (stable_freq_history << 1ul) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
-        stable_freq_flg = (stable_freq_history & ~(1ul<<NUM_STABLE_FREQ)) == ~(1ul<<NUM_STABLE_FREQ);
+        stable_freq_history = (stable_freq_history << 1) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
+        uint32_t stable_mask = ((1ul << NUM_STABLE_FREQ) - 1);
+        stable_freq_flg = (stable_freq_history & stable_mask) == stable_mask;
+        if (setup_done && stable_freq_flg && block_aligned) {
+            stable_done = true;
+            stable_lost = false;
+        } else if (setup_done && stable_done && (!stable_freq_flg || !block_aligned)) {
+            stable_lost = true;
+        }
         samp_freq = sf;
     }
     block_count++;
@@ -276,11 +329,147 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         check_block(to_buff_ptr(done_ptr));
     }
     prev_time = now;
+    prev_time32 = _millis();
 }
 
-void spdif_rx_setup(const spdif_rx_config_t *config)
+void spdif_rx_set_config(const spdif_rx_config_t *config)
 {
-    //pio_program_id = 0;
+    memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
+}
+
+int spdif_rx_search()
+{
+    spdif_rx_samp_freq_t samp_freq;
+    bool inverted;
+    if (setup_done) {
+        spdif_rx_end();
+        setup_done = false;
+    }
+    if (spdif_rx_detect(&samp_freq, &inverted)) {
+        spdif_rx_setup(samp_freq, inverted);
+        setup_done = true;
+        return 1;
+    }
+    return 0;
+}
+
+int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
+{
+    // DMA0
+    dma_channel_claim(gcfg.dma_channel0);
+    dma_config0 = dma_channel_get_default_config(gcfg.dma_channel0);
+    channel_config_set_transfer_data_size(&dma_config0, DMA_SIZE_32);
+    channel_config_set_read_increment(&dma_config0, false);
+    channel_config_set_write_increment(&dma_config0, true);
+    channel_config_set_dreq(&dma_config0, DREQ_PIOx_RX0 + gcfg.pio_sm);
+    channel_config_set_chain_to(&dma_config0, gcfg.dma_channel0);
+
+    dma_channel_configure(
+        gcfg.dma_channel0,
+        &dma_config0,
+        fifo_buff,
+        &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
+        SPDIF_RX_DETECT_SIZE,
+        false // trigger
+    );
+    dma_channel_start(gcfg.dma_channel0);
+
+    // === PIO configuration ===
+    pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
+    uint offset = pio_add_program(spdif_rx_pio, &spdif_rx_detect_program);
+    spdif_rx_detect_program_init(
+        spdif_rx_pio,
+        gcfg.pio_sm,
+        offset,
+        gcfg.data_pin
+    );
+
+    sleep_us(100); // give enough time to detect toggles and sample SPDIF_RX_DETECT_SIZE times
+
+    bool timeout = false;
+    if (dma_channel_is_busy(gcfg.dma_channel0)) {
+        dma_channel_abort(gcfg.dma_channel0);
+        timeout = true;
+    }
+    pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
+    pio_remove_program(spdif_rx_pio, &spdif_rx_detect_program, offset);
+    pio_clear_instruction_memory(spdif_rx_pio);
+    pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
+    dma_channel_unclaim(gcfg.dma_channel0);
+
+    if (timeout) {
+        return 0;
+    }
+
+    // sampled data analysis to calculate min_width, max_width, max_edge_interval for both 0 and 1
+    //for (int i = 0; i < SPDIF_RX_DETECT_SIZE; i++) printf("data[%3d] = %032b\n", i, fifo_buff[i]);
+    int edge_interval[2] = {0, 0};
+    int min_width[2] = {256, 256};
+    //int max_width[2] = {0, 0}; // not needed for frequency detection
+    int max_edge_interval[2] = {0, 0};
+    int i = 0;
+    int succ = 0;
+    int cur = 1;
+    // bithacks for trailing zeros by de Bruijn sequences
+    const int MultiplyDeBruijnBitPosition[32] = {
+        0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,
+        31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
+    };
+    while (i < 32 * SPDIF_RX_DETECT_SIZE) {
+        int word_idx = i / 32;
+        int bit_pos = i % 32;
+        uint32_t v = (cur) ? ~fifo_buff[word_idx] : fifo_buff[word_idx];
+        int r = (v) ? MultiplyDeBruijnBitPosition[((uint32_t) ((v & -v) * 0x077CB531U)) >> 27] : 32;
+        if (r + bit_pos <= 31) { // within 32bit
+            succ += r;
+            int next = 1 - cur;
+            if (min_width[cur] > succ) min_width[cur] = succ;
+            //if (max_width[cur] < succ) max_width[cur] = succ;
+            if (max_edge_interval[next] < edge_interval[next] + succ) max_edge_interval[next] = edge_interval[next] + succ;
+            edge_interval[next] = 0; // this edge
+            edge_interval[cur] += succ; // other edge
+            fifo_buff[word_idx] >>= r;
+            i += r;
+            succ = 0;
+            cur = next;
+        } else { // otherwise go first bit in next 32bit
+            i += 32 - bit_pos;
+            succ += 32 - bit_pos;
+        }
+    }
+    //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
+
+    // evaluate analysis result to confirm if it meets criteria of sampling frequencies
+    const int SC = 1; // sample criteria
+    for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
+        int min_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] / 128; // symbol cycle
+        // Judge polarity: thanks to great idea by IDC-Dragon
+        // focusing on Sync Code M which appears in L sub-frame (except for head frame in the block)
+        //                                                                    |<--------->|
+        // if max interval of rising edge = 6,  then polarity is normal   (0 -> 1 1 1 0 0 0 1 0 -> 1)
+        // if max interval of falling edge = 6, then polarity is inverted (1 -> 0 0 0 1 1 1 0 1 -> 0)
+        int max_edge_interval_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] * 6 / 128; // symbol cycle
+        if ((min_width[0] >= min_exp - SC && min_width[0] <= min_exp + SC) && (min_width[1] >= min_exp - SC && min_width[1] <= min_exp + SC)) {
+            if (max_edge_interval[1] >= max_edge_interval_exp - SC && max_edge_interval[1] <= max_edge_interval_exp + SC) { // normal bit stream
+                *samp_freq = samp_freq_array[i];
+                *inverted = false;
+                return 1;
+            } else if (max_edge_interval[0] >= max_edge_interval_exp - SC && max_edge_interval[0] <= max_edge_interval_exp + SC) { // inverted bit stream
+                *samp_freq = samp_freq_array[i];
+                *inverted = true;
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool inverted)
+{
+    pio_program_id = spdif_rx_get_pio_promgam_id(samp_freq, inverted);
+    stable_done = false;
+    stable_lost = false;
     buff_wr_pre_ptr = 0;
     buff_wr_done_ptr = 0;
     buff_rd_ptr = 0;
@@ -294,12 +483,6 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     parity_err_count = 0;
 
     spdif_rx_spin_lock = spin_lock_init(SPINLOCK_ID_AUDIO_FREE_LIST_LOCK);
-
-    if (config != NULL) {
-        memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
-    }
-    // === PIO configuration ===
-    pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
 
     // === DMA configuration ===
     __mem_fence_release();
@@ -352,6 +535,8 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     // Start DMA
     dma_channel_start(gcfg.dma_channel0);
 
+    // === PIO configuration ===
+    pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
     // PIO start
     spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
     decode_pg.offset = pio_add_program(spdif_rx_pio, decode_pg.program);
@@ -381,18 +566,16 @@ void spdif_rx_end()
     dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1, false);
 }
 
-void spdif_rx_search_next()
+spdif_rx_status_t spdif_rx_get_status()
 {
-    spdif_rx_end();
-    pio_program_id = (pio_program_id + 1) % (sizeof(decode_sets) / sizeof(spdif_rx_pio_program_t));
-    spdif_rx_setup(NULL);
-}
-
-bool spdif_rx_get_status()
-{
-    uint64_t now = _micros();
-    // false if not block_aligned or no IRQ in recent 10 ms
-    return block_aligned && stable_freq_flg && (now <= prev_time + 10000);
+    uint64_t now = _millis();
+    if (setup_done && !stable_done) {
+        return SPDIF_RX_STATUS_WAITING_STABLE;
+    } else if (setup_done && stable_done && !stable_lost && now <= prev_time32 + 10) { // exclude stable when no IRQ in recent 10 ms
+        return SPDIF_RX_STATUS_STABLE;
+    } else {
+        return SPDIF_RX_STATUS_NO_SIGNAL;
+    }
 }
 
 float spdif_rx_get_samp_freq_actual()

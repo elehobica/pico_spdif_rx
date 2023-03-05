@@ -59,11 +59,6 @@ typedef enum _clkdiv_speed_t {
 
 static int32_t volume = 10;
 
-static inline uint32_t _millis(void)
-{
-	return to_ms_since_boot(get_absolute_time());
-}
-
 void save_center_clkdiv(PIO pio, uint sm)
 {
     reg_clkdiv = &(pio->sm[sm].clkdiv);
@@ -160,7 +155,7 @@ void decode()
     int32_t *samples = (int32_t *) ab->buffer->bytes;
 
     uint32_t fifo_count = spdif_rx_get_fifo_count();
-    if (spdif_rx_get_status()) {
+    if (spdif_rx_get_status() == SPDIF_RX_STATUS_STABLE) {
         if (mute_flag && fifo_count >= SPDIF_RX_FIFO_SIZE / 2) {
             mute_flag = false;
         }
@@ -264,14 +259,12 @@ int main()
     gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
     gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWM mode for less Audio noise
 
-    spdif_rx_setup(&spdif_rx_config);
-    printf("spdif_rx setup done\n");
+    spdif_rx_set_config(&spdif_rx_config);
 
     bool configured = false;
-    uint32_t last_trial = 0;
     while (true) {
-        uint32_t now = _millis();
-        if (spdif_rx_get_status()) {
+        spdif_rx_status_t status = spdif_rx_get_status();
+        if (status == SPDIF_RX_STATUS_STABLE) {
             if (!configured) {
                 uint32_t samp_freq = spdif_rx_get_samp_freq();
                 float samp_freq_actual = spdif_rx_get_samp_freq_actual();
@@ -284,15 +277,12 @@ int main()
                 i2s_audio_init(samp_freq);
                 configured = true;
             }
-        } else {
-            if (now - last_trial > 200) { // to give a chance to stable decode for 200 ms until next try
-                if (configured) {
-                    printf("stable sync not detected\n");
-                }
-                spdif_rx_search_next();
-                last_trial = now;
-                configured = false;
+        } else if (status == SPDIF_RX_STATUS_NO_SIGNAL) {
+            if (configured) {
+                printf("stable sync not detected\n");
             }
+            spdif_rx_search();
+            configured = false;
         }
         int c = getchar_timeout_us(0);
         if (c) {
