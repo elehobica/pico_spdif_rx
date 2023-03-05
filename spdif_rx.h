@@ -52,6 +52,12 @@ typedef enum _spdif_rx_samp_freq_t {
     SAMP_FREQ_192000 = 192000
 } spdif_rx_samp_freq_t;
 
+typedef enum _spdif_rx_status_t {
+    SPDIF_RX_STATUS_NO_SIGNAL = 0,
+    SPDIF_RX_STATUS_WAITING_STABLE,
+    SPDIF_RX_STATUS_STABLE,
+} spdif_rx_status_t;
+
 #define SPDIF_BLOCK_SIZE (384) // sub frames per block
 #define NUM_BLOCKS (8) // must be >= 2
 #define SPDIF_RX_FIFO_SIZE (NUM_BLOCKS * SPDIF_BLOCK_SIZE)
@@ -61,7 +67,7 @@ int spdif_rx_search();
 int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *is_inv);
 void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool is_inv);
 void spdif_rx_end();
-bool spdif_rx_get_status();
+spdif_rx_status_t spdif_rx_get_status();
 float spdif_rx_get_samp_freq_actual();
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq();
 uint32_t spdif_rx_get_c_bits();

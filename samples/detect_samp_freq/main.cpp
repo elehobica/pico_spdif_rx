@@ -58,7 +58,7 @@ int main()
     spdif_rx_set_config(&config);
 
     while (true) {
-        if (spdif_rx_get_status()) {
+        if (spdif_rx_get_status() == SPDIF_RX_STATUS_STABLE) {
             uint32_t samp_freq = spdif_rx_get_samp_freq();
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
             printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
@@ -67,7 +67,6 @@ int main()
         } else {
             printf("stable sync not detected\n");
             if (spdif_rx_search()) {
-                sleep_ms(200);
             }
         }
         tight_loop_contents();

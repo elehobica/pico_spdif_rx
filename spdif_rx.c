@@ -92,7 +92,8 @@ static const spdif_rx_samp_freq_t samp_freq_array[] = {
     SAMP_FREQ_192000
 };
 
-static bool setup_done_flg = false;
+static bool setup_done = false;
+static bool stable_done = false;
 static int pio_program_id = 0;
 static int block_count;
 static uint64_t prev_time;
@@ -303,6 +304,11 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         }
         stable_freq_history = (stable_freq_history << 1ul) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
         stable_freq_flg = (stable_freq_history & ~(1ul<<NUM_STABLE_FREQ)) == ~(1ul<<NUM_STABLE_FREQ);
+        if (setup_done && stable_freq_flg && block_aligned) {
+            stable_done = true;
+        } else if (setup_done && stable_done && (!stable_freq_flg || !block_aligned)) {
+            stable_done = false;
+        }
         samp_freq = sf;
     }
     block_count++;
@@ -326,12 +332,13 @@ int spdif_rx_search()
 {
     spdif_rx_samp_freq_t samp_freq;
     bool is_inv;
-    if (setup_done_flg) {
+    if (setup_done) {
         spdif_rx_end();
+        setup_done = false;
     }
     if (spdif_rx_detect(&samp_freq, &is_inv)) {
         spdif_rx_setup(samp_freq, is_inv);
-        setup_done_flg = true;
+        setup_done = true;
         return 1;
     }
     return 0;
@@ -563,11 +570,16 @@ void spdif_rx_end()
     dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1, false);
 }
 
-bool spdif_rx_get_status()
+spdif_rx_status_t spdif_rx_get_status()
 {
     uint64_t now = _micros();
-    // false if not block_aligned or no IRQ in recent 10 ms
-    return block_aligned && stable_freq_flg && (now <= prev_time + 10000);
+    if (setup_done && !stable_done) {
+        return SPDIF_RX_STATUS_WAITING_STABLE;
+    } else if (setup_done && stable_done && now <= prev_time + 10000) { // exclude stable when no IRQ in recent 10 ms
+        return SPDIF_RX_STATUS_STABLE;
+    } else {
+        return SPDIF_RX_STATUS_NO_SIGNAL;
+    }
 }
 
 float spdif_rx_get_samp_freq_actual()
