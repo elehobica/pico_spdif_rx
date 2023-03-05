@@ -92,6 +92,7 @@ static const spdif_rx_samp_freq_t samp_freq_array[] = {
     SAMP_FREQ_192000
 };
 
+static bool setup_done_flg = false;
 static int pio_program_id = 0;
 static int block_count;
 static uint64_t prev_time;
@@ -316,9 +317,28 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     prev_time = now;
 }
 
-int spdif_rx_detect(const spdif_rx_config_t *config, spdif_rx_samp_freq_t *samp_freq, bool *is_inv)
+void spdif_rx_set_config(const spdif_rx_config_t *config)
 {
     memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
+}
+
+int spdif_rx_search()
+{
+    spdif_rx_samp_freq_t samp_freq;
+    bool is_inv;
+    if (setup_done_flg) {
+        spdif_rx_end();
+    }
+    if (spdif_rx_detect(&samp_freq, &is_inv)) {
+        spdif_rx_setup(samp_freq, is_inv);
+        setup_done_flg = true;
+        return 1;
+    }
+    return 0;
+}
+
+int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *is_inv)
+{
     // DMA0
     dma_channel_claim(gcfg.dma_channel0);
     dma_config0 = dma_channel_get_default_config(gcfg.dma_channel0);
@@ -391,7 +411,7 @@ int spdif_rx_detect(const spdif_rx_config_t *config, spdif_rx_samp_freq_t *samp_
         prev = cur;
         fifo_buff[i / 32] >>= 1;
     }
-    //printf("min0 = %d, max0 = %d, max_edge0 = %d, min1 = %d, max1 = %d, max_edge1 = %d\n", min_width[0], max_width[0], max_edge_interval[0], min_width[1], max_width[1], max_edge_interval[1]);
+    //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
 
     const int SC = 1; // sample criteria
     for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
@@ -444,7 +464,7 @@ static int spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool is_i
     return pio_program_id;
 }
 
-void spdif_rx_setup(const spdif_rx_config_t *config, spdif_rx_samp_freq_t samp_freq, bool is_inv)
+void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool is_inv)
 {
     pio_program_id = spdif_rx_get_pio_promgam_id(samp_freq, is_inv);
     buff_wr_pre_ptr = 0;
@@ -460,7 +480,6 @@ void spdif_rx_setup(const spdif_rx_config_t *config, spdif_rx_samp_freq_t samp_f
     parity_err_count = 0;
 
     spdif_rx_spin_lock = spin_lock_init(SPINLOCK_ID_AUDIO_FREE_LIST_LOCK);
-    memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
 
     // === DMA configuration ===
     __mem_fence_release();

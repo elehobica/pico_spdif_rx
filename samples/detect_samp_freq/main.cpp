@@ -55,30 +55,23 @@ int main()
         .full_check = true
     };
 
-    spdif_rx_samp_freq_t samp_freq = SAMP_FREQ_NONE;
-    bool is_inv = false;
+    spdif_rx_set_config(&config);
 
     while (true) {
-        int flag = spdif_rx_detect(&config, &samp_freq, &is_inv);
-        if (flag) {
-            printf("detected\n");
-            spdif_rx_setup(&config, samp_freq, is_inv);
-            printf("setup done\n");
-            sleep_ms(300); // to give a chance to stable decode
-            while (spdif_rx_get_status()) {
-                uint32_t samp_freq = spdif_rx_get_samp_freq();
-                float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-                printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
-                printf("c_bits = 0x%08x\n", spdif_rx_get_c_bits());
-                printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
-                tight_loop_contents();
-                sleep_ms(1000);
-            }
-            spdif_rx_end();
+        if (spdif_rx_get_status()) {
+            uint32_t samp_freq = spdif_rx_get_samp_freq();
+            float samp_freq_actual = spdif_rx_get_samp_freq_actual();
+            printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
+            printf("c_bits = 0x%08x\n", spdif_rx_get_c_bits());
+            printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
+        } else {
             printf("stable sync not detected\n");
+            if (spdif_rx_search()) {
+                sleep_ms(200);
+            }
         }
         tight_loop_contents();
-        sleep_ms(1);
+        sleep_ms(1000);
     }
 
     return 0;
