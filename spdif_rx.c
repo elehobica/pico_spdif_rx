@@ -33,7 +33,8 @@ dma_channel_config dma_config0;
 dma_channel_config dma_config1;
 
 #define SYSTEM_CLK_FREQUENCY (125000000)
-// sample words to detect is equivalent to 64*4+8 symbols (1 frame + sync) at 44.1 KHz @ 125 MHz clock
+// sample words to detect is equivalent to 64*4+8 symbols (2 frames + sync) at 44.1 KHz @ 125 MHz clock
+// because at least one Sync M Code has to be included in sampled words (-> need 2 frames considering when head block hits)
 #define SPDIF_RX_DETECT_SIZE (((SYSTEM_CLK_FREQUENCY / SAMP_FREQ_44100 / 128 + 1) * (64 * 4 + 8) + 31) / 32)
 
 #define spdif_rx_pio __CONCAT(pio, PICO_SPDIF_RX_PIO)
@@ -195,9 +196,10 @@ static int check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
 
             // Parity (27 bits of every sub frame)
             uint32_t v = buff[i] & 0x7FFFFFF0; // excluding P and sync
+            // bithack by Compute parity of word with a multiply
             v ^= v >> 1;
             v ^= v >> 2;
-            v = (v & 0x11111111) * 0x11111111; // bithacks trick, faster than __builtin_parity()
+            v = (v & 0x11111111) * 0x11111111;
             v = (v << (31-28)); // parity is now in bit 28, move to bit 31
             if ((v ^ buff[i]) & (1<<31)) {
                 block_parity_err_count++;
@@ -410,7 +412,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     int i = 0;
     int succ = 0;
     int cur = 1;
-    // bithacks for trailing zeros by de Bruijn sequences
+    // bithack for trailing zeros by de Bruijn sequences
     const int MultiplyDeBruijnBitPosition[32] = {
         0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,
         31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
@@ -419,7 +421,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
         int word_idx = i / 32;
         int bit_pos = i % 32;
         uint32_t v = (cur) ? ~fifo_buff[word_idx] : fifo_buff[word_idx];
-        int r = (v) ? MultiplyDeBruijnBitPosition[((uint32_t) ((v & -v) * 0x077CB531U)) >> 27] : 32;
+        int r = (v) ? MultiplyDeBruijnBitPosition[((uint32_t) ((v & -v) * 0x077CB531U)) >> 27] : 32; // trailing zeros 
         if (r + bit_pos <= 31) { // within 32bit
             succ += r;
             int next = 1 - cur;
@@ -442,14 +444,15 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     // evaluate analysis result to confirm if it meets criteria of sampling frequencies
     const int SC = 1; // sample criteria
     for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
+        // check if minimum width meets
         int min_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] / 128; // symbol cycle
-        // Judge polarity: thanks to great idea by IDC-Dragon
-        // focusing on Sync Code M which appears in L sub-frame (except for head frame in the block)
-        //                                                                    |<--------->|
-        // if max interval of rising edge = 6,  then polarity is normal   (0 -> 1 1 1 0 0 0 1 0 -> 1)
-        // if max interval of falling edge = 6, then polarity is inverted (1 -> 0 0 0 1 1 1 0 1 -> 0)
-        int max_edge_interval_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] * 6 / 128; // symbol cycle
         if ((min_width[0] >= min_exp - SC && min_width[0] <= min_exp + SC) && (min_width[1] >= min_exp - SC && min_width[1] <= min_exp + SC)) {
+            // Judge polarity: thanks to great idea by IDC-Dragon
+            // focusing on Sync Code M which appears in L sub-frame (except for head frame in the block)
+            //                                                                      |<--------->|
+            // if max interval of rising edge = 6,  then polarity is normal   (0 -> 1 1 1 0 0 0 1 0 -> 1)
+            // if max interval of falling edge = 6, then polarity is inverted (1 -> 0 0 0 1 1 1 0 1 -> 0)
+            int max_edge_interval_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] * 6 / 128; // symbol cycle
             if (max_edge_interval[1] >= max_edge_interval_exp - SC && max_edge_interval[1] <= max_edge_interval_exp + SC) { // normal bit stream
                 *samp_freq = samp_freq_array[i];
                 *inverted = false;
@@ -461,7 +464,6 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
             }
         }
     }
-
     return 0;
 }
 
