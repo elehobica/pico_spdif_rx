@@ -34,7 +34,7 @@ dma_channel_config dma_config1;
 
 #define SYSTEM_CLK_FREQUENCY (125000000)
 // sample words to detect is equivalent to 64*4+8 symbols (1 frame + sync) at 44.1 KHz @ 125 MHz clock
-#define SPDIF_RX_DETECT_SIZE ((SYSTEM_CLK_FREQUENCY / SAMP_FREQ_44100 / 128 + 1) * (64 * 4 + 8) / 32)
+#define SPDIF_RX_DETECT_SIZE (((SYSTEM_CLK_FREQUENCY / SAMP_FREQ_44100 / 128 + 1) * (64 * 4 + 8) + 31) / 32)
 
 #define spdif_rx_pio __CONCAT(pio, PICO_SPDIF_RX_PIO)
 #define DREQ_PIOx_RX0 __CONCAT(__CONCAT(DREQ_PIO, PICO_SPDIF_RX_PIO), _RX0)
@@ -254,7 +254,7 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
     return done_ptr;
 }
 
-static int spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool is_inv)
+static int spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool inverted)
 {
     int pio_program_id = 0;
     switch (samp_freq) {
@@ -274,7 +274,7 @@ static int spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool is_i
             pio_program_id = SPDIF_RX_PIO_PROG_48000;
             break;
     }
-    if (is_inv) {
+    if (inverted) {
         pio_program_id++;
     }
     return pio_program_id;
@@ -339,20 +339,20 @@ void spdif_rx_set_config(const spdif_rx_config_t *config)
 int spdif_rx_search()
 {
     spdif_rx_samp_freq_t samp_freq;
-    bool is_inv;
+    bool inverted;
     if (setup_done) {
         spdif_rx_end();
         setup_done = false;
     }
-    if (spdif_rx_detect(&samp_freq, &is_inv)) {
-        spdif_rx_setup(samp_freq, is_inv);
+    if (spdif_rx_detect(&samp_freq, &inverted)) {
+        spdif_rx_setup(samp_freq, inverted);
         setup_done = true;
         return 1;
     }
     return 0;
 }
 
-int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *is_inv)
+int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
 {
     // DMA0
     dma_channel_claim(gcfg.dma_channel0);
@@ -402,49 +402,62 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *is_inv)
 
     // sampled data analysis to calculate min_width, max_width, max_edge_interval for both 0 and 1
     //for (int i = 0; i < SPDIF_RX_DETECT_SIZE; i++) printf("data[%3d] = %032b\n", i, fifo_buff[i]);
-    int prev = fifo_buff[0] & 0x1;
-    int succ = 1;
-    int edge_interval[2] = {1, 1};
+    int edge_interval[2] = {0, 0};
     int min_width[2] = {256, 256};
     //int max_width[2] = {0, 0}; // not needed for frequency detection
     int max_edge_interval[2] = {0, 0};
-    fifo_buff[0] >>= 1;
-    for (int i = 1; i < 32 * SPDIF_RX_DETECT_SIZE; i++) {
-        int cur = fifo_buff[i / 32] & 0x1;
-        if (cur == prev) {
-            succ++;
-            edge_interval[cur]++; // this edge
-            edge_interval[1 - cur]++; // another edge
-        } else {
-            if (min_width[prev] > succ) min_width[prev] = succ;
-            //if (max_width[prev] < succ) max_width[prev] = succ;
-            if (max_edge_interval[cur] < edge_interval[cur]) max_edge_interval[cur] = edge_interval[cur];
-            succ = 1;
-            edge_interval[cur] = 1; // this edge
-            edge_interval[prev]++; // another edge
+    int i = 0;
+    int succ = 0;
+    int cur = 1;
+    bool end_flag = false;
+    // bithacks for trailing zeros by de Bruijn sequences
+    const int MultiplyDeBruijnBitPosition[32] = {
+        0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,
+        31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
+    };
+    while (i < 32 * SPDIF_RX_DETECT_SIZE) {
+        int word_idx = i / 32;
+        int bit_pos = i % 32;
+        uint32_t v = (cur) ? ~fifo_buff[word_idx] : fifo_buff[word_idx];
+        int r = (v) ? MultiplyDeBruijnBitPosition[((uint32_t) ((v & -v) * 0x077CB531U)) >> 27] : 32;
+        if (r + bit_pos <= 31) { // within 32bit
+            succ += r;
+            int next = 1 - cur;
+            edge_interval[cur] += succ;
+            edge_interval[next] += succ;
+            if (min_width[cur] > succ) min_width[cur] = succ;
+            //if (max_width[cur] < succ) max_width[cur] = succ;
+            if (max_edge_interval[next] < edge_interval[next]) max_edge_interval[next] = edge_interval[next];
+            edge_interval[next] = 0; // this edge
+            fifo_buff[word_idx] >>= r;
+            i += r;
+            succ = 0;
+            cur = next;
+        } else { // otherwise go first bit in next 32bit
+            i += 32 - bit_pos;
+            succ += 32 - bit_pos;
         }
-        prev = cur;
-        fifo_buff[i / 32] >>= 1;
     }
     //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
 
+    // evaluate analysis result to confirm if it meets criteria of sampling frequencies
     const int SC = 1; // sample criteria
     for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
         int min_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] / 128; // symbol cycle
         // Judge polarity: thanks to great idea by IDC-Dragon
         // focusing on Sync Code M which appears in L sub-frame (except for head frame in the block)
         //                                                                    |<--------->|
-        // if max interval of rising edge = 6,  then polarity is normal (0 -> 1 1 1 0 0 0 1 0 -> 1)
-        // if max interval of falling edge = 6, then polarity is inv    (1 -> 0 0 0 1 1 1 0 1 -> 0)
+        // if max interval of rising edge = 6,  then polarity is normal   (0 -> 1 1 1 0 0 0 1 0 -> 1)
+        // if max interval of falling edge = 6, then polarity is inverted (1 -> 0 0 0 1 1 1 0 1 -> 0)
         int max_edge_interval_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] * 6 / 128; // symbol cycle
         if ((min_width[0] >= min_exp - SC && min_width[0] <= min_exp + SC) && (min_width[1] >= min_exp - SC && min_width[1] <= min_exp + SC)) {
-            if (max_edge_interval[1] >= max_edge_interval_exp - SC && max_edge_interval[1] <= max_edge_interval_exp + SC) { // normal
+            if (max_edge_interval[1] >= max_edge_interval_exp - SC && max_edge_interval[1] <= max_edge_interval_exp + SC) { // normal bit stream
                 *samp_freq = samp_freq_array[i];
-                *is_inv = false;
+                *inverted = false;
                 return 1;
-            } else if (max_edge_interval[0] >= max_edge_interval_exp - SC && max_edge_interval[0] <= max_edge_interval_exp + SC) { // normal
+            } else if (max_edge_interval[0] >= max_edge_interval_exp - SC && max_edge_interval[0] <= max_edge_interval_exp + SC) { // inverted bit stream
                 *samp_freq = samp_freq_array[i];
-                *is_inv = true;
+                *inverted = true;
                 return 1;
             }
         }
@@ -453,9 +466,9 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *is_inv)
     return 0;
 }
 
-void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool is_inv)
+void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool inverted)
 {
-    pio_program_id = spdif_rx_get_pio_promgam_id(samp_freq, is_inv);
+    pio_program_id = spdif_rx_get_pio_promgam_id(samp_freq, inverted);
     stable_done = false;
     stable_lost = false;
     buff_wr_pre_ptr = 0;

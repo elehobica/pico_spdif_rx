@@ -64,8 +64,8 @@ typedef enum _spdif_rx_status_t {
 
 void spdif_rx_set_config(const spdif_rx_config_t *config);
 int spdif_rx_search();
-int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *is_inv);
-void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool is_inv);
+int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted);
+void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool inverted);
 void spdif_rx_end();
 spdif_rx_status_t spdif_rx_get_status();
 float spdif_rx_get_samp_freq_actual();
