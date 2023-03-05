@@ -308,8 +308,9 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
                 break;
             }
         }
-        stable_freq_history = (stable_freq_history << 1ul) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
-        stable_freq_flg = (stable_freq_history & ~(1ul<<NUM_STABLE_FREQ)) == ~(1ul<<NUM_STABLE_FREQ);
+        stable_freq_history = (stable_freq_history << 1) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
+        uint32_t stable_mask = ((1ul << NUM_STABLE_FREQ) - 1);
+        stable_freq_flg = (stable_freq_history & stable_mask) == stable_mask;
         if (setup_done && stable_freq_flg && block_aligned) {
             stable_done = true;
             stable_lost = false;
