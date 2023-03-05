@@ -118,28 +118,6 @@ static inline uint32_t _millis(void)
     return to_ms_since_boot(get_absolute_time());
 }
 
-static inline void spdif_rx_detect_program_init(PIO pio, uint sm, uint offset, uint pin) {
-    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
-    pio_gpio_init(pio, pin);
-    gpio_pull_down(pin);
-    pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
-
-    pio_sm_config sm_config = spdif_rx_detect_program_get_default_config(offset);
-
-    sm_config_set_clkdiv(&sm_config, 1);
-    sm_config_set_jmp_pin(&sm_config, pin);
-    sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
-    sm_config_set_in_shift(&sm_config, true, true, 32); // shift_right, autopush, 32bit
-    sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
-
-    pio_sm_init(pio, sm, offset, &sm_config);
-    pio_sm_set_pins(pio, sm, 0); // clear pins
-
-    pio_sm_set_enabled(pio, sm, true);
-
-    pio_sm_exec(pio, sm, pio_encode_jmp(offset + spdif_rx_detect_offset_entry_point));
-}
-
 static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint entry_point, pio_sm_config (*get_default_config)(uint), uint pin) {
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);
@@ -272,6 +250,32 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
     buff_wr_pre_ptr = ptr_inc(buff_wr_pre_ptr, SPDIF_BLOCK_SIZE);
     spin_unlock(spdif_rx_spin_lock, save);
     return done_ptr;
+}
+
+static int spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool is_inv)
+{
+    int pio_program_id = 0;
+    switch (samp_freq) {
+        case SAMP_FREQ_44100: // fallthrough
+        case SAMP_FREQ_48000:
+            pio_program_id = SPDIF_RX_PIO_PROG_48000;
+            break;
+        case SAMP_FREQ_88200: // fallthrough
+        case SAMP_FREQ_96000:
+            pio_program_id = SPDIF_RX_PIO_PROG_96000;
+            break;
+        case SAMP_FREQ_176400: // fallthrough
+        case SAMP_FREQ_192000:
+            pio_program_id = SPDIF_RX_PIO_PROG_192000;
+            break;
+        default:
+            pio_program_id = SPDIF_RX_PIO_PROG_48000;
+            break;
+    }
+    if (is_inv) {
+        pio_program_id++;
+    }
+    return pio_program_id;
 }
 
 // irq handler for DMA
@@ -443,32 +447,6 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *is_inv)
     }
 
     return 0;
-}
-
-static int spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool is_inv)
-{
-    int pio_program_id = 0;
-    switch (samp_freq) {
-        case SAMP_FREQ_44100: // fallthrough
-        case SAMP_FREQ_48000:
-            pio_program_id = SPDIF_RX_PIO_PROG_48000;
-            break;
-        case SAMP_FREQ_88200: // fallthrough
-        case SAMP_FREQ_96000:
-            pio_program_id = SPDIF_RX_PIO_PROG_96000;
-            break;
-        case SAMP_FREQ_176400: // fallthrough
-        case SAMP_FREQ_192000:
-            pio_program_id = SPDIF_RX_PIO_PROG_192000;
-            break;
-        default:
-            pio_program_id = SPDIF_RX_PIO_PROG_48000;
-            break;
-    }
-    if (is_inv) {
-        pio_program_id++;
-    }
-    return pio_program_id;
 }
 
 void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool is_inv)
