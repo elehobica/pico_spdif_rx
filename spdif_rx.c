@@ -78,26 +78,25 @@ static const spdif_rx_samp_freq_t samp_freq_array[] = {
 
 static int pio_program_id = 0;
 static int block_count;
-static uint64_t prev_time;
-static uint64_t block_interval[NUM_AVE];
+static uint64_t prev_time; // last ISR timestamp (note: 64 bit is not atomic to foreground)
+static uint32_t block_interval[NUM_AVE];
+static uint32_t block_interval_accum; // accumulation of array
 static bool block_aligned;
 static int block_align_count;
-static float samp_freq_actual;
-static spdif_rx_samp_freq_t samp_freq;
 static uint32_t stable_freq_history;
-static bool stable_freq_flg;
 static uint trans_count = SPDIF_BLOCK_SIZE;
 static uint32_t c_bits;
 static uint32_t parity_err_count;
 
-static inline uint64_t _micros(void)
-{
-	return to_us_since_boot(get_absolute_time());
-}
 
-static inline uint32_t _millis(void)
-{
-	return to_ms_since_boot(get_absolute_time());
+// foreground read a 64 bit value, safe of being non-atomic, changed by ISR
+static inline uint64_t get64_isr_shared(volatile uint64_t* p_val) { // use volatile to enforce 2nd read not to be optimized away
+    uint64_t value1, value2;
+    value1 = *p_val;
+    while ((value2 = *p_val) != value1) { // 2nd read to test for consistent value
+        value1 = value2; // in the unlikely event of an ISR modifying it in between, try again
+    }
+    return value1;
 }
 
 static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint entry_point, pio_sm_config (*get_default_config)(uint), uint pin) {
@@ -249,7 +248,7 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
     bool proc_dma0 = false;
     bool proc_dma1 = false;
-    uint64_t now = _micros();
+    uint64_t now = time_us_64();
     if (dma_irqn_get_channel_status(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0)) {
         dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0);
         proc_dma0 = true;
@@ -257,26 +256,20 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1);
         proc_dma1 = true;
     }
-    { // Calculate samp_freq and check if it's stable
-        block_interval[block_count % NUM_AVE] = now - prev_time;
-        uint64_t accum = 0;
-        for (int i = 0; i < NUM_AVE; i++) {
-            accum += block_interval[i];
-        }
-        float ave_block_interval = (float) accum / NUM_AVE;
-        float bitrate_16b = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
-        samp_freq_actual = bitrate_16b / 32.0;
-        spdif_rx_samp_freq_t sf = SAMP_FREQ_NONE;
-        for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
-            if (samp_freq_actual >= (float) samp_freq_array[i] * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) samp_freq_array[i] * (1.0 + SF_CRITERIA)) {
-                sf = samp_freq_array[i];
-                break;
-            }
-        }
-        stable_freq_history = (stable_freq_history << 1ul) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
-        stable_freq_flg = (stable_freq_history & ~(1ul<<NUM_STABLE_FREQ)) == ~(1ul<<NUM_STABLE_FREQ);
-        samp_freq = sf;
+
+    { // check if sample rate (pace of this interrupt) is stable over a number of readings
+        uint32_t timediff = (uint32_t)now - (uint32_t)prev_time; // 32 bit is enough for diff
+        prev_time = now; // but store this with 64 bit, for foreground
+        block_interval_accum += timediff - block_interval[block_count % NUM_AVE]; // add newest, subtract oldest
+        block_interval[block_count % NUM_AVE] = timediff; // update newest entry
+
+        uint32_t lower_limit = timediff - timediff / 128; // a bit less than 1% deviation, power of 2 is favorable
+        uint32_t upper_limit = timediff + timediff / 128;
+        uint32_t avg_block_interval = block_interval_accum / NUM_AVE;
+        bool stable_now = (lower_limit <= avg_block_interval && avg_block_interval <= upper_limit);
+        stable_freq_history = (stable_freq_history << 1) | stable_now; // shift register
     }
+
     block_count++;
 
     if (proc_dma0) {
@@ -286,7 +279,6 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         uint32_t done_ptr = dma_done_and_restart(gcfg.dma_channel1, &dma_config1);
         checkBlock(to_buff_ptr(done_ptr));
     }
-    prev_time = now;
 }
 
 void spdif_rx_setup(const spdif_rx_config_t *config)
@@ -299,7 +291,8 @@ void spdif_rx_setup(const spdif_rx_config_t *config)
     block_aligned = false;
     block_align_count = 0;
     stable_freq_history = 0;
-    stable_freq_flg = false;
+    memset(block_interval, 0, sizeof(block_interval));
+    block_interval_accum = 0;
     trans_count = SPDIF_BLOCK_SIZE;
     c_bits = 0;
     parity_err_count = 0;
@@ -402,19 +395,38 @@ void spdif_rx_search_next()
 
 bool spdif_rx_get_status()
 {
-    uint64_t now = _micros();
+    uint64_t now = time_us_64();
+
+    // check if stable long enough
+    uint32_t stable_mask = (1<<(NUM_STABLE_FREQ+1)) - 1; // number of LSB ones
+    bool stable_freq_flg = (stable_freq_history & stable_mask) == stable_mask;
+
     // false if not block_aligned or no IRQ in recent 10 ms
-    return block_aligned && stable_freq_flg && (now <= prev_time + 10000);
+    uint64_t prev = get64_isr_shared(&prev_time); // safe read of ISR modified
+    return block_aligned && stable_freq_flg && (now <= prev + 10000);
 }
 
 float spdif_rx_get_samp_freq_actual()
 {
+    float avg_block_time = (float)block_interval_accum / NUM_AVE * 1e-6;
+    float samp_freq_actual = (float)(SPDIF_BLOCK_SIZE / 2) / avg_block_time;
     return samp_freq_actual;
 }
 
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq()
 {
-    return samp_freq;
+    spdif_rx_samp_freq_t sf = SAMP_FREQ_NONE; // default if not found below
+    float samp_freq_actual = spdif_rx_get_samp_freq_actual();
+    // search for a matching nominal frequency
+    for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
+        float lower_limit = (float)samp_freq_array[i] * (1.0 - SF_CRITERIA);
+        float upper_limit = (float)samp_freq_array[i] * (1.0 + SF_CRITERIA);
+        if (lower_limit <= samp_freq_actual && samp_freq_actual <= upper_limit) {
+            sf = samp_freq_array[i];
+            break;
+        }
+    }
+    return sf;
 }
 
 uint32_t spdif_rx_get_c_bits()
