@@ -21,17 +21,6 @@
 #include "spdif_rx_96000.pio.h"
 #include "spdif_rx_192000.pio.h"
 
-static spin_lock_t* spdif_rx_spin_lock;
-
-uint32_t fifo_buff[SPDIF_RX_FIFO_SIZE];
-static uint32_t buff_wr_pre_ptr = 0;
-static uint32_t buff_wr_done_ptr = 0;
-static uint32_t buff_rd_ptr = 0;
-static uint32_t buff_count;
-
-dma_channel_config dma_config0;
-dma_channel_config dma_config1;
-
 #define SYSTEM_CLK_FREQUENCY (125000000)
 // sample words to detect is equivalent to 64*4+8 symbols (2 frames + sync) at 44.1 KHz @ 125 MHz clock
 // because at least one Sync M Code has to be included in sampled words (-> need 2 frames considering when head block hits)
@@ -42,21 +31,11 @@ dma_channel_config dma_config1;
 
 #define DMA_IRQ_x __CONCAT(DMA_IRQ_, PICO_SPDIF_RX_DMA_IRQ)
 
-#define SYNC_B 0b1111
-#define SYNC_M 0b1011
-#define SYNC_W 0b0111
-
 #define SF_CRITERIA (0.01)
 #define NUM_AVE (8)
 #define NUM_STABLE_FREQ (16) // 1 ~ 31
 
 static spdif_rx_config_t gcfg;
-
-static audio_format_t audio_format = {
-    .sample_freq = 44100, // default
-    .pcm_format = AUDIO_PCM_FORMAT_S32,
-    .channel_count = AUDIO_CHANNEL_STEREO
-};
 
 typedef enum _spdif_rx_pio_program_id_t  {
     SPDIF_RX_PIO_PROG_48000 = 0,
@@ -93,10 +72,25 @@ static const spdif_rx_samp_freq_t samp_freq_array[] = {
     SAMP_FREQ_192000
 };
 
+// Sync codes which appears the output of decode PIO program
+static const uint32_t SYNC_B = 0b1111;
+static const uint32_t SYNC_M = 0b1011;
+static const uint32_t SYNC_W = 0b0111;
+
+static uint32_t fifo_buff[SPDIF_RX_FIFO_SIZE];
+static uint32_t buff_wr_pre_ptr = 0;
+static uint32_t buff_wr_done_ptr = 0;
+static uint32_t buff_rd_ptr = 0;
+static uint32_t buff_count;
+
+static spin_lock_t* spdif_rx_spin_lock;
+static dma_channel_config dma_config0;
+static dma_channel_config dma_config1;
+
 static bool setup_done = false;
 static bool stable_done = false;
 static bool stable_lost = false;
-static int pio_program_id = 0;
+static spdif_rx_pio_program_t *decode_pg;
 static int block_count;
 static uint64_t prev_time = 0;
 static uint64_t prev_time32 = 0;
@@ -256,9 +250,9 @@ static uint32_t dma_done_and_restart(uint8_t dma_channel, dma_channel_config* dm
     return done_ptr;
 }
 
-static int spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool inverted)
+static spdif_rx_pio_program_id_t spdif_rx_get_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool inverted)
 {
-    int pio_program_id = 0;
+    spdif_rx_pio_program_id_t pio_program_id;
     switch (samp_freq) {
         case SAMP_FREQ_44100: // fallthrough
         case SAMP_FREQ_48000:
@@ -369,9 +363,9 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     dma_channel_configure(
         gcfg.dma_channel0,
         &dma_config0,
-        fifo_buff,
+        fifo_buff, // dest
         &spdif_rx_pio->rxf[gcfg.pio_sm],  // src
-        SPDIF_RX_DETECT_SIZE,
+        SPDIF_RX_DETECT_SIZE, // count
         false // trigger
     );
     dma_channel_start(gcfg.dma_channel0);
@@ -469,7 +463,6 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
 
 void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool inverted)
 {
-    pio_program_id = spdif_rx_get_pio_promgam_id(samp_freq, inverted);
     stable_done = false;
     stable_lost = false;
     buff_wr_pre_ptr = 0;
@@ -540,14 +533,15 @@ void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool inverted)
     // === PIO configuration ===
     pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
     // PIO start
-    spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
-    decode_pg.offset = pio_add_program(spdif_rx_pio, decode_pg.program);
+    spdif_rx_pio_program_id_t pio_program_id = spdif_rx_get_pio_promgam_id(samp_freq, inverted);
+    decode_pg = &decode_sets[pio_program_id];
+    decode_pg->offset = pio_add_program(spdif_rx_pio, decode_pg->program);
     spdif_rx_program_init(
         spdif_rx_pio,
         gcfg.pio_sm,
-        decode_pg.offset,
-        decode_pg.entry_point,
-        decode_pg.get_default_config,
+        decode_pg->offset,
+        decode_pg->entry_point,
+        decode_pg->get_default_config,
         gcfg.data_pin
     );
 }
@@ -557,8 +551,7 @@ void spdif_rx_end()
     dma_channel_abort(gcfg.dma_channel0);
     dma_channel_abort(gcfg.dma_channel1);
     pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
-    spdif_rx_pio_program_t decode_pg = decode_sets[pio_program_id];
-    pio_remove_program(spdif_rx_pio, decode_pg.program, decode_pg.offset);
+    pio_remove_program(spdif_rx_pio, decode_pg->program, decode_pg->offset);
     pio_clear_instruction_memory(spdif_rx_pio);
     pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
     dma_channel_unclaim(gcfg.dma_channel0);
@@ -570,7 +563,7 @@ void spdif_rx_end()
 
 spdif_rx_status_t spdif_rx_get_status()
 {
-    uint64_t now = _millis();
+    uint32_t now = _millis();
     if (setup_done && !stable_done) {
         return SPDIF_RX_STATUS_WAITING_STABLE;
     } else if (setup_done && stable_done && !stable_lost && now <= prev_time32 + 10) { // exclude stable when no IRQ in recent 10 ms
