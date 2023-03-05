@@ -59,11 +59,6 @@ typedef enum _clkdiv_speed_t {
 
 static int32_t volume = 10;
 
-static inline uint32_t _millis(void)
-{
-	return to_ms_since_boot(get_absolute_time());
-}
-
 void save_center_clkdiv(PIO pio, uint sm)
 {
     reg_clkdiv = &(pio->sm[sm].clkdiv);
@@ -267,9 +262,7 @@ int main()
     spdif_rx_set_config(&spdif_rx_config);
 
     bool configured = false;
-    uint32_t last_trial = 0;
     while (true) {
-        uint32_t now = _millis();
         spdif_rx_status_t status = spdif_rx_get_status();
         if (status == SPDIF_RX_STATUS_STABLE) {
             if (!configured) {
@@ -289,7 +282,6 @@ int main()
                 printf("stable sync not detected\n");
             }
             spdif_rx_search();
-            last_trial = now;
             configured = false;
         }
         int c = getchar_timeout_us(0);

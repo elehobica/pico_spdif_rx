@@ -94,9 +94,11 @@ static const spdif_rx_samp_freq_t samp_freq_array[] = {
 
 static bool setup_done = false;
 static bool stable_done = false;
+static bool stable_lost = false;
 static int pio_program_id = 0;
 static int block_count;
-static uint64_t prev_time;
+static uint64_t prev_time = 0;
+static uint64_t prev_time32 = 0;
 static uint64_t block_interval[NUM_AVE];
 static bool block_aligned;
 static int block_align_count;
@@ -310,8 +312,9 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         stable_freq_flg = (stable_freq_history & ~(1ul<<NUM_STABLE_FREQ)) == ~(1ul<<NUM_STABLE_FREQ);
         if (setup_done && stable_freq_flg && block_aligned) {
             stable_done = true;
+            stable_lost = false;
         } else if (setup_done && stable_done && (!stable_freq_flg || !block_aligned)) {
-            stable_done = false;
+            stable_lost = true;
         }
         samp_freq = sf;
     }
@@ -325,6 +328,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         check_block(to_buff_ptr(done_ptr));
     }
     prev_time = now;
+    prev_time32 = _millis();
 }
 
 void spdif_rx_set_config(const spdif_rx_config_t *config)
@@ -452,6 +456,8 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *is_inv)
 void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool is_inv)
 {
     pio_program_id = spdif_rx_get_pio_promgam_id(samp_freq, is_inv);
+    stable_done = false;
+    stable_lost = false;
     buff_wr_pre_ptr = 0;
     buff_wr_done_ptr = 0;
     buff_rd_ptr = 0;
@@ -550,10 +556,10 @@ void spdif_rx_end()
 
 spdif_rx_status_t spdif_rx_get_status()
 {
-    uint64_t now = _micros();
+    uint64_t now = _millis();
     if (setup_done && !stable_done) {
         return SPDIF_RX_STATUS_WAITING_STABLE;
-    } else if (setup_done && stable_done && now <= prev_time + 10000) { // exclude stable when no IRQ in recent 10 ms
+    } else if (setup_done && stable_done && !stable_lost && now <= prev_time32 + 10) { // exclude stable when no IRQ in recent 10 ms
         return SPDIF_RX_STATUS_STABLE;
     } else {
         return SPDIF_RX_STATUS_NO_SIGNAL;
