@@ -399,6 +399,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
 
     // sampled data analysis to calculate min_width, max_width, max_edge_interval for both 0 and 1
     //for (int i = 0; i < SPDIF_RX_DETECT_SIZE; i++) printf("data[%3d] = %032b\n", i, fifo_buff[i]);
+    const int SC = 1; // sample criteria
     int edge_interval[2] = {0, 0};
     int min_width[2] = {256, 256};
     //int max_width[2] = {0, 0}; // not needed for frequency detection
@@ -411,7 +412,8 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
         0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,
         31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
     };
-    while (i < 32 * SPDIF_RX_DETECT_SIZE) {
+    int num_check_bits = 32 * SPDIF_RX_DETECT_SIZE;
+    while (i < num_check_bits) {
         int word_idx = i / 32;
         int bit_pos = i % 32;
         uint32_t v = (cur) ? ~fifo_buff[word_idx] : fifo_buff[word_idx];
@@ -419,7 +421,15 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
         if (r + bit_pos <= 31) { // within 32bit
             succ += r;
             int next = 1 - cur;
-            if (min_width[cur] > succ) min_width[cur] = succ;
+            if (min_width[cur] > succ) {
+                min_width[cur] = succ;
+                // early termination by min_width (the higher frequency, the fewer samples for equivalent number of frames)
+                if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_176400 / 128 + SC) {
+                    num_check_bits = 32 * SPDIF_RX_DETECT_SIZE / 4;
+                } else if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_88200 / 128 + SC) {
+                    num_check_bits = 32 * SPDIF_RX_DETECT_SIZE / 2;
+                }
+            }
             //if (max_width[cur] < succ) max_width[cur] = succ;
             if (max_edge_interval[next] < edge_interval[next] + succ) max_edge_interval[next] = edge_interval[next] + succ;
             edge_interval[next] = 0; // this edge
@@ -436,7 +446,6 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
 
     // evaluate analysis result to confirm if it meets criteria of sampling frequencies
-    const int SC = 1; // sample criteria
     for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
         // check if minimum width meets
         int min_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] / 128; // symbol cycle
