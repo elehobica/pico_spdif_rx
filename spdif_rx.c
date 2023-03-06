@@ -412,11 +412,11 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     int succ = 0;
     int cur = 1;
     int num_check_bits = 32 * SPDIF_RX_DETECT_SIZE;
+    uint32_t shift_reg = fifo_buff[0];
     while (i < num_check_bits) {
         int word_idx = i / 32;
         int bit_pos = i % 32;
-        uint32_t v = (cur) ? ~fifo_buff[word_idx] : fifo_buff[word_idx];
-        int r = __builtin_ctz(v); // trailing zeros
+        int r = __builtin_ctz((cur) ? ~shift_reg : shift_reg); // trailing zeros
         if (r + bit_pos <= 31) { // within 32bit
             succ += r;
             int next = 1 - cur;
@@ -433,13 +433,14 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
             if (max_edge_interval[next] < edge_interval[next] + succ) max_edge_interval[next] = edge_interval[next] + succ;
             edge_interval[next] = 0; // this edge
             edge_interval[cur] += succ; // other edge
-            fifo_buff[word_idx] >>= r;
+            shift_reg >>= r;
             i += r;
             succ = 0;
             cur = next;
         } else { // otherwise go first bit in next 32bit
             i += 32 - bit_pos;
             succ += 32 - bit_pos;
+            shift_reg = fifo_buff[i/32];
         }
     }
     //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
