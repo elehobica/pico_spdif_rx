@@ -7,15 +7,15 @@
 #define PICO_SPDIF_RX_PIO 1
 #define PICO_SPDIF_RX_DMA_IRQ 1
 
-#include <stdio.h>
-#include <string.h>
 #include "spdif_rx.h"
 
-#include "pico/stdlib.h"
+#include <stdio.h>
+#include <string.h>
 #include "hardware/pio.h"
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include "hardware/sync.h"
+#include "pico/audio.h"
 #include "spdif_rx_detect.pio.h"
 #include "spdif_rx_48000.pio.h"
 #include "spdif_rx_96000.pio.h"
@@ -310,6 +310,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         if (setup_done && stable_freq_flg && block_aligned) {
             stable_done = true;
             stable_lost = false;
+            prev_time32 = _millis();
         } else if (setup_done && stable_done && (!stable_freq_flg || !block_aligned)) {
             stable_lost = true;
         }
@@ -325,7 +326,6 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)() {
         check_block(to_buff_ptr(done_ptr));
     }
     prev_time = now;
-    prev_time32 = _millis();
 }
 
 void spdif_rx_set_config(const spdif_rx_config_t *config)
@@ -338,11 +338,11 @@ int spdif_rx_search()
     spdif_rx_samp_freq_t samp_freq;
     bool inverted;
     if (setup_done) {
-        spdif_rx_end();
+        spdif_rx_decode_end();
         setup_done = false;
     }
     if (spdif_rx_detect(&samp_freq, &inverted)) {
-        spdif_rx_setup(samp_freq, inverted);
+        spdif_rx_decode_setup(samp_freq, inverted);
         setup_done = true;
         return 1;
     }
@@ -470,7 +470,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     return 0;
 }
 
-void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool inverted)
+void spdif_rx_decode_setup(spdif_rx_samp_freq_t samp_freq, bool inverted)
 {
     stable_done = false;
     stable_lost = false;
@@ -553,9 +553,10 @@ void spdif_rx_setup(spdif_rx_samp_freq_t samp_freq, bool inverted)
         decode_pg->get_default_config,
         gcfg.data_pin
     );
+    prev_time32 = _millis();
 }
 
-void spdif_rx_end()
+void spdif_rx_decode_end()
 {
     dma_channel_abort(gcfg.dma_channel0);
     dma_channel_abort(gcfg.dma_channel1);
@@ -573,9 +574,9 @@ void spdif_rx_end()
 spdif_rx_status_t spdif_rx_get_status()
 {
     uint32_t now = _millis();
-    if (setup_done && !stable_done) {
+    if (setup_done && !stable_done && now <= prev_time32 + 400) { // give 400 ms to get first stable after setup
         return SPDIF_RX_STATUS_WAITING_STABLE;
-    } else if (setup_done && stable_done && !stable_lost && now <= prev_time32 + 10) { // exclude stable when no IRQ in recent 10 ms
+    } else if (setup_done && stable_done && !stable_lost && now <= prev_time32 + 10) { // regard as lost signal when no IRQ in recent 10 ms
         return SPDIF_RX_STATUS_STABLE;
     } else {
         return SPDIF_RX_STATUS_NO_SIGNAL;

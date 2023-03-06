@@ -260,6 +260,7 @@ int main()
     gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWM mode for less Audio noise
 
     spdif_rx_set_config(&spdif_rx_config);
+    printf("waiting for signal\n");
 
     bool configured = false;
     while (true) {
@@ -279,7 +280,8 @@ int main()
             }
         } else if (status == SPDIF_RX_STATUS_NO_SIGNAL) {
             if (configured) {
-                printf("stable sync not detected\n");
+                printf("lost stable sync\n");
+                printf("waiting for signal\n");
             }
             spdif_rx_search();
             configured = false;
