@@ -192,7 +192,7 @@ static int check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
 
             // Parity (27 bits of every sub frame)
             uint32_t v = buff[i] & 0x7FFFFFF0; // excluding P and sync
-            // bithack by Compute parity of word with a multiply
+            // bithack by Compute parity of word with a multiply, faster than __builtin_parity()
             v ^= v >> 1;
             v ^= v >> 2;
             v = (v & 0x11111111) * 0x11111111;
@@ -411,17 +411,12 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     int i = 0;
     int succ = 0;
     int cur = 1;
-    // bithack for trailing zeros by de Bruijn sequences
-    const int MultiplyDeBruijnBitPosition[32] = {
-        0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,
-        31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
-    };
     int num_check_bits = 32 * SPDIF_RX_DETECT_SIZE;
     while (i < num_check_bits) {
         int word_idx = i / 32;
         int bit_pos = i % 32;
         uint32_t v = (cur) ? ~fifo_buff[word_idx] : fifo_buff[word_idx];
-        int r = (v) ? MultiplyDeBruijnBitPosition[((uint32_t) ((v & -v) * 0x077CB531U)) >> 27] : 32; // trailing zeros 
+        int r = __builtin_ctz(v); // trailing zeros
         if (r + bit_pos <= 31) { // within 32bit
             succ += r;
             int next = 1 - cur;
