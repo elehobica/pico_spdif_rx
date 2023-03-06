@@ -414,9 +414,8 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     int num_check_bits = 32 * SPDIF_RX_DETECT_SIZE;
     uint32_t shift_reg = fifo_buff[0];
     while (i < num_check_bits) {
-        int word_idx = i / 32;
         int bit_pos = i % 32;
-        int r = __builtin_ctz((cur) ? ~shift_reg : shift_reg); // trailing zeros
+        int r = __builtin_clz((cur) ? ~shift_reg : shift_reg); // leading zeros
         if (r + bit_pos <= 31) { // within 32bit
             succ += r;
             int next = 1 - cur;
@@ -433,7 +432,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
             if (max_edge_interval[next] < edge_interval[next] + succ) max_edge_interval[next] = edge_interval[next] + succ;
             edge_interval[next] = 0; // this edge
             edge_interval[cur] += succ; // other edge
-            shift_reg >>= r;
+            shift_reg <<= r;
             i += r;
             succ = 0;
             cur = next;

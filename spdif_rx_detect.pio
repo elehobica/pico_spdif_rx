@@ -39,7 +39,7 @@ static inline void spdif_rx_detect_program_init(PIO pio, uint sm, uint offset, u
     sm_config_set_clkdiv(&sm_config, 1);
     sm_config_set_jmp_pin(&sm_config, pin);
     sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
-    sm_config_set_in_shift(&sm_config, true, true, 32); // shift_right, autopush, 32bit
+    sm_config_set_in_shift(&sm_config, false, true, 32); // shift_left, autopush, 32bit
     sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
 
     pio_sm_init(pio, sm, offset, &sm_config);
