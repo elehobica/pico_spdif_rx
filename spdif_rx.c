@@ -130,6 +130,8 @@ static inline void spdif_rx_program_init(PIO pio, uint sm, uint offset, uint ent
 
     pio_sm_init(pio, sm, offset, &sm_config);
     pio_sm_set_pins(pio, sm, 0); // clear pins
+    pio_sm_clear_fifos(pio, sm);
+    pio_sm_drain_tx_fifo(pio, sm);
 
     // set y, OSR (use as fixed value)
     pio_sm_set_enabled(pio, sm, false);
@@ -387,6 +389,8 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
         dma_channel_abort(gcfg.dma_channel0);
         timeout = true;
     }
+    pio_sm_set_enabled(spdif_rx_pio, gcfg.pio_sm, false);
+    pio_sm_clear_fifos(spdif_rx_pio, gcfg.pio_sm);
     pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
     pio_remove_program(spdif_rx_pio, &spdif_rx_detect_program, offset);
     pio_clear_instruction_memory(spdif_rx_pio);
@@ -560,6 +564,8 @@ void spdif_rx_decode_end()
 {
     dma_channel_abort(gcfg.dma_channel0);
     dma_channel_abort(gcfg.dma_channel1);
+    pio_sm_set_enabled(spdif_rx_pio, gcfg.pio_sm, false);
+    pio_sm_clear_fifos(spdif_rx_pio, gcfg.pio_sm);
     pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
     pio_remove_program(spdif_rx_pio, decode_pg->program, decode_pg->offset);
     pio_clear_instruction_memory(spdif_rx_pio);

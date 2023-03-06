@@ -33,7 +33,6 @@ static inline void spdif_rx_detect_program_init(PIO pio, uint sm, uint offset, u
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);
     gpio_pull_down(pin);
-    pio_sm_drain_tx_fifo(pio, sm);
 
     pio_sm_config sm_config = spdif_rx_detect_program_get_default_config(offset);
 
@@ -45,6 +44,8 @@ static inline void spdif_rx_detect_program_init(PIO pio, uint sm, uint offset, u
 
     pio_sm_init(pio, sm, offset, &sm_config);
     pio_sm_set_pins(pio, sm, 0); // clear pins
+    pio_sm_clear_fifos(pio, sm);
+    pio_sm_drain_tx_fifo(pio, sm);
 
     pio_sm_set_enabled(pio, sm, true);
 
