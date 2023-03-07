@@ -402,47 +402,60 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     }
 
     // sampled data analysis to calculate min_width, max_width, max_edge_interval for both 0 and 1
-    //for (int i = 0; i < SPDIF_RX_DETECT_SIZE; i++) printf("data[%3d] = %032b\n", i, fifo_buff[i]);
     const int SC = 1; // sample criteria
     int edge_interval[2] = {0, 0};
     int min_width[2] = {256, 256};
     //int max_width[2] = {0, 0}; // not needed for frequency detection
     int max_edge_interval[2] = {0, 0};
-    int i = 0;
-    int succ = 0;
-    int cur = 1;
-    int num_check_bits = 32 * SPDIF_RX_DETECT_SIZE;
-    uint32_t shift_reg = fifo_buff[0];
-    while (i < num_check_bits) {
-        int bit_pos = i % 32;
-        int r = __builtin_clz((cur) ? ~shift_reg : shift_reg); // leading zeros
-        if (r + bit_pos <= 31) { // within 32bit
-            succ += r;
-            int next = 1 - cur;
-            if (min_width[cur] > succ) {
-                min_width[cur] = succ;
-                // early termination by min_width (the higher frequency, the fewer samples for equivalent number of frames)
-                if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_176400 / 128 + SC) {
-                    num_check_bits = 32 * SPDIF_RX_DETECT_SIZE / 4;
-                } else if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_88200 / 128 + SC) {
-                    num_check_bits = 32 * SPDIF_RX_DETECT_SIZE / 2;
+    {
+        //for (int i = 0; i < SPDIF_RX_DETECT_SIZE; i++) printf("data[%3d] = %032b\n", i, fifo_buff[i]);
+        int succ = 0;
+        int cur = 1;
+        int num_check_words = SPDIF_RX_DETECT_SIZE;
+        uint32_t shift_reg = fifo_buff[0];
+        int bit_pos = 0;
+        int word_idx = 0;
+        while (true) {
+            int r = __builtin_clz((cur) ? ~shift_reg : shift_reg); // leading zeros
+            if (r + bit_pos <= 31) { // within 32bit
+                succ += r;
+                int next = 1 - cur;
+                if (min_width[cur] > succ) {
+                    min_width[cur] = succ;
+                    // early termination by min_width (the higher frequency, the fewer samples for equivalent number of frames)
+                    if (min_width[cur] < SYSTEM_CLK_FREQUENCY / SAMP_FREQ_192000 / 128 - SC) {
+                        num_check_words = 0; // no hope in this case, force termination
+                        break;
+                    } else if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_176400 / 128 + SC) {
+                        num_check_words = SPDIF_RX_DETECT_SIZE / 4;
+                    } else if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_88200 / 128 + SC) {
+                        num_check_words = SPDIF_RX_DETECT_SIZE / 2;
+                    }
                 }
+                //if (max_width[cur] < succ) max_width[cur] = succ;
+                if (max_edge_interval[next] < edge_interval[next] + succ) max_edge_interval[next] = edge_interval[next] + succ;
+                edge_interval[next] = 0; // this edge
+                edge_interval[cur] += succ; // other edge
+                shift_reg <<= r;
+                bit_pos += r;
+                succ = 0;
+                cur = next;
+            } else { // otherwise go first bit in next 32bit
+                succ += 32 - bit_pos;
+                bit_pos = 0;
+                word_idx++;
+                if (word_idx >= num_check_words) { // end of analysis
+                    break;
+                }
+                shift_reg = fifo_buff[word_idx];
             }
-            //if (max_width[cur] < succ) max_width[cur] = succ;
-            if (max_edge_interval[next] < edge_interval[next] + succ) max_edge_interval[next] = edge_interval[next] + succ;
-            edge_interval[next] = 0; // this edge
-            edge_interval[cur] += succ; // other edge
-            shift_reg <<= r;
-            i += r;
-            succ = 0;
-            cur = next;
-        } else { // otherwise go first bit in next 32bit
-            i += 32 - bit_pos;
-            succ += 32 - bit_pos;
-            shift_reg = fifo_buff[i/32];
+        }
+        //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
+
+        if (num_check_words == 0) { // force termination
+            return 0;
         }
     }
-    //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
 
     // evaluate analysis result to confirm if it meets criteria of sampling frequencies
     for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
