@@ -387,6 +387,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     bool timeout = false;
     if (dma_channel_is_busy(gcfg.dma_channel0)) {
         dma_channel_abort(gcfg.dma_channel0);
+        dma_channel_wait_for_finish_blocking(gcfg.dma_channel0);
         timeout = true;
     }
     pio_sm_set_enabled(spdif_rx_pio, gcfg.pio_sm, false);
@@ -424,8 +425,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
                     min_width[cur] = succ;
                     // early termination by min_width (the higher frequency, the fewer samples for equivalent number of frames)
                     if (min_width[cur] < SYSTEM_CLK_FREQUENCY / SAMP_FREQ_192000 / 128 - SC) {
-                        num_check_words = 0; // no hope in this case, force termination
-                        break;
+                        break; // no hope in this case, force termination
                     } else if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_176400 / 128 + SC) {
                         num_check_words = SPDIF_RX_DETECT_SIZE / 4;
                     } else if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_88200 / 128 + SC) {
@@ -452,7 +452,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
         }
         //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
 
-        if (num_check_words == 0) { // force termination
+        if (word_idx < num_check_words) { // force termination
             return 0;
         }
     }
