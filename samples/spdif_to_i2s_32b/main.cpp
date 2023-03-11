@@ -38,6 +38,7 @@ static spdif_rx_config_t spdif_rx_config = {
     .pio_sm = 0,
     .dma_channel0 = 2,
     .dma_channel1 = 3,
+    .alarm = 0,
     .full_check = true
 };
 
@@ -155,7 +156,7 @@ void decode()
     int32_t *samples = (int32_t *) ab->buffer->bytes;
 
     uint32_t fifo_count = spdif_rx_get_fifo_count();
-    if (spdif_rx_get_status() == SPDIF_RX_STATUS_STABLE) {
+    if (spdif_rx_get_state() == SPDIF_RX_STATE_STABLE) {
         if (mute_flag && fifo_count >= SPDIF_RX_FIFO_SIZE / 2) {
             mute_flag = false;
         }
@@ -246,6 +247,19 @@ void i2s_callback_func()
     }
 }
 
+static bool i2c_setup = false;
+void on_stable_func(spdif_rx_samp_freq_t samp_freq)
+{
+    // callback function should be returned as quick as possible
+    i2c_setup = true;
+}
+
+void on_lost_stable_func()
+{
+    // callback function should be returned as quick as possible
+    printf("lost stable sync. waiting for signal\n");
+}
+
 int main()
 {
     stdio_init_all();
@@ -259,32 +273,22 @@ int main()
     gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
     gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWM mode for less Audio noise
 
-    spdif_rx_set_config(&spdif_rx_config);
-    printf("waiting for signal\n");
+    spdif_rx_start(&spdif_rx_config);
+    spdif_rx_set_callback_on_stable(on_stable_func);
+    spdif_rx_set_callback_on_lost_stable(on_lost_stable_func);
 
-    bool configured = false;
     while (true) {
-        spdif_rx_status_t status = spdif_rx_get_status();
-        if (status == SPDIF_RX_STATUS_STABLE) {
-            if (!configured) {
-                uint32_t samp_freq = spdif_rx_get_samp_freq();
-                float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-                uint32_t c_bits = spdif_rx_get_c_bits();
-                printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
-                printf("SPDIF C bits = 0x%08x\n", c_bits);
-                if (ap != nullptr) {
-                    i2s_audio_deinit(); // deinit needs to be done when input is stable
-                }
-                i2s_audio_init(samp_freq);
-                configured = true;
+        if (i2c_setup) {
+            i2c_setup = false;
+            spdif_rx_samp_freq_t samp_freq = spdif_rx_get_samp_freq();
+            float samp_freq_actual = spdif_rx_get_samp_freq_actual();
+            uint32_t c_bits = spdif_rx_get_c_bits();
+            printf("Samp Freq = %d Hz (%6.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
+            printf("SPDIF C bits = %08x\n", c_bits);
+            if (ap != nullptr) {
+                i2s_audio_deinit(); // deinit needs to be done when input is stable
             }
-        } else if (status == SPDIF_RX_STATUS_NO_SIGNAL) {
-            if (configured) {
-                printf("lost stable sync\n");
-                printf("waiting for signal\n");
-            }
-            spdif_rx_search();
-            configured = false;
+            i2s_audio_init(samp_freq);
         }
         int c = getchar_timeout_us(0);
         if (c) {
