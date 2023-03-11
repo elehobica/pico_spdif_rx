@@ -114,13 +114,8 @@ static uint32_t c_bits;
 static uint32_t parity_err_count;
 
 // prototype declaration
-static void _spdif_rx_capture_start();
-static void _spdif_rx_capture_end();
-static void _spdif_rx_capture_timeout(uint alarm_num);
-static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t *samp_freq, bool *inverted);
-static void _spdif_rx_decode_start(spdif_rx_samp_freq_t samp_freq, bool inverted);
-static void _spdif_rx_decode_end();
-static void _spdif_rx_decode_timeout(uint alarm_num);
+static void _spdif_rx_capture_retry(uint alarm_num);
+void __isr __time_critical_func(spdif_rx_dma_irq_handler)();
 
 static inline uint64_t _micros(void)
 {
@@ -320,96 +315,6 @@ static inline void _set_timer_after_by_ms(hardware_alarm_callback_t callback, ui
     hardware_alarm_set_target(gcfg.alarm, delayed_by_ms(get_absolute_time(), after_ms));
 }
 
-static inline void _spdif_rx_capture_retry(uint alarm_num)
-{
-    _clear_timer();
-    _spdif_rx_capture_start();
-    _set_timer_after_by_us(_spdif_rx_capture_timeout, 100);
-}
-
-// irq handler for DMA
-void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
-{
-    _clear_timer(); // timeout must not happen while isr
-    bool proc_dma0 = false;
-    bool proc_dma1 = false;
-    uint64_t now_us = _micros();
-    uint32_t now_ms = _millis();
-    if (dma_irqn_get_channel_status(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0)) {
-        dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0);
-        proc_dma0 = true;
-    } else if (dma_irqn_get_channel_status(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1)) {
-        dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1);
-        proc_dma1 = true;
-    }
-    // state transition in capture operation case
-    if (state == SPDIF_RX_STATE_NO_SIGNAL) {
-        spdif_rx_samp_freq_t samp_freq;
-        bool inverted;
-        _spdif_rx_capture_end();
-        if (!_spdif_rx_analyze_capture(&samp_freq, &inverted)) {
-            _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
-            return;
-        }
-        state = SPDIF_RX_STATE_WAITING_STABLE;
-        _spdif_rx_decode_start(samp_freq, inverted);
-        waiting_start_time_ms = _millis();
-        setup_done = true;
-        _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
-        return;
-    }
-    // decode operation below here
-    { // Calculate samp_freq and check if it's stable
-        block_interval[block_count % NUM_AVE] = now_us - prev_time_us;
-        uint64_t accum = 0;
-        for (int i = 0; i < NUM_AVE; i++) {
-            accum += block_interval[i];
-        }
-        float ave_block_interval = (float) accum / NUM_AVE;
-        float bitrate_16b = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
-        samp_freq_actual = bitrate_16b / 32.0;
-        spdif_rx_samp_freq_t sf = SAMP_FREQ_NONE;
-        for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
-            if (samp_freq_actual >= (float) samp_freq_array[i] * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) samp_freq_array[i] * (1.0 + SF_CRITERIA)) {
-                sf = samp_freq_array[i];
-                break;
-            }
-        }
-        stable_freq_history = (stable_freq_history << 1) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
-        uint32_t stable_mask = ((1ul << NUM_STABLE_FREQ) - 1);
-        stable_freq_flg = (stable_freq_history & stable_mask) == stable_mask;
-        if (setup_done && stable_freq_flg && block_aligned) {
-            state = SPDIF_RX_STATE_STABLE;
-        } else if (setup_done && stable_done && (!stable_freq_flg || !block_aligned)) {
-            state = SPDIF_RX_STATE_NO_SIGNAL;
-        }
-        samp_freq = sf;
-    }
-    block_count++;
-    if (proc_dma0) {
-        uint32_t done_ptr = _dma_done_and_restart(gcfg.dma_channel0, &dma_config0);
-        _check_block(_to_buff_ptr(done_ptr));
-    } else if (proc_dma1) {
-        uint32_t done_ptr = _dma_done_and_restart(gcfg.dma_channel1, &dma_config1);
-        _check_block(_to_buff_ptr(done_ptr));
-    }
-    // state transition in decode operation case
-    if (state == SPDIF_RX_STATE_STABLE) {
-        if (!stable_done) {
-            if (on_stable_func != NULL) {
-                on_stable_func(samp_freq);
-            }
-        }
-        stable_done = true;
-        _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
-    } else if (state == SPDIF_RX_STATE_WAITING_STABLE && now_ms < waiting_start_time_ms + decode_wait_stable_ms) {
-        _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
-    } else {
-        _spdif_rx_decode_timeout(gcfg.alarm); // call decode timeout target directly
-    }
-    prev_time_us = now_us;
-}
-
 static void _spdif_rx_capture_start()
 {
     // DMA0
@@ -454,7 +359,7 @@ static void _spdif_rx_capture_start()
     );
 }
 
-static void _spdif_rx_capture_end()
+static void _spdif_rx_common_end()
 {
     dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0, false);
     dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1, false);
@@ -467,20 +372,29 @@ static void _spdif_rx_capture_end()
     dma_channel_wait_for_finish_blocking(gcfg.dma_channel1);
     dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1);
     dma_channel_unclaim(gcfg.dma_channel1);
-
     pio_sm_set_enabled(spdif_rx_pio, gcfg.pio_sm, false);
     pio_sm_clear_fifos(spdif_rx_pio, gcfg.pio_sm);
     pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
     pio_remove_program(spdif_rx_pio, current_pg->program, current_pg->offset);
     pio_clear_instruction_memory(spdif_rx_pio);
     pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
+    if (!irq_has_shared_handler(DMA_IRQ_x)) {
+        irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
+    }
 }
 
 static void _spdif_rx_capture_timeout(uint alarm_num)
 {
     _clear_timer();
-    _spdif_rx_capture_end();
+    _spdif_rx_common_end();
     _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
+}
+
+static void _spdif_rx_capture_retry(uint alarm_num)
+{
+    _clear_timer();
+    _spdif_rx_capture_start();
+    _set_timer_after_by_us(_spdif_rx_capture_timeout, 100);
 }
 
 static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
@@ -563,6 +477,17 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t *samp_freq, bool *inve
         }
     }
     return 0;
+}
+
+static void _spdif_rx_decode_timeout(uint alarm_num)
+{
+    state = SPDIF_RX_STATE_NO_SIGNAL;
+    if (on_lost_stable_func != NULL) {
+        on_lost_stable_func();
+    }
+    _clear_timer();
+    _spdif_rx_common_end();
+    _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
 }
 
 static void _spdif_rx_decode_start(spdif_rx_samp_freq_t samp_freq, bool inverted)
@@ -648,41 +573,87 @@ static void _spdif_rx_decode_start(spdif_rx_samp_freq_t samp_freq, bool inverted
     );
 }
 
-static void _spdif_rx_decode_end()
+// irq handler for DMA
+void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
 {
-    dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0, false);
-    dma_irqn_set_channel_enabled(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1, false);
-    irq_set_enabled(DMA_IRQ_x, false);
-
-    pio_sm_set_enabled(spdif_rx_pio, gcfg.pio_sm, false);
-    pio_sm_clear_fifos(spdif_rx_pio, gcfg.pio_sm);
-    pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
-    pio_remove_program(spdif_rx_pio, current_pg->program, current_pg->offset);
-    pio_clear_instruction_memory(spdif_rx_pio);
-    pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
-
-    dma_channel_abort(gcfg.dma_channel0);
-    dma_channel_wait_for_finish_blocking(gcfg.dma_channel0);
-    dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0);
-    dma_channel_unclaim(gcfg.dma_channel0);
-    dma_channel_abort(gcfg.dma_channel1);
-    dma_channel_wait_for_finish_blocking(gcfg.dma_channel1);
-    dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1);
-    dma_channel_unclaim(gcfg.dma_channel1);
-    if (!irq_has_shared_handler(DMA_IRQ_x)) {
-        irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
+    _clear_timer(); // timeout must not happen while isr
+    bool proc_dma0 = false;
+    bool proc_dma1 = false;
+    uint64_t now_us = _micros();
+    uint32_t now_ms = _millis();
+    if (dma_irqn_get_channel_status(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0)) {
+        dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0);
+        proc_dma0 = true;
+    } else if (dma_irqn_get_channel_status(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1)) {
+        dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1);
+        proc_dma1 = true;
     }
-}
-
-static void _spdif_rx_decode_timeout(uint alarm_num)
-{
-    state = SPDIF_RX_STATE_NO_SIGNAL;
-    if (on_lost_stable_func != NULL) {
-        on_lost_stable_func();
+    // state transition in capture operation case
+    if (state == SPDIF_RX_STATE_NO_SIGNAL) {
+        spdif_rx_samp_freq_t samp_freq;
+        bool inverted;
+        _spdif_rx_common_end();
+        if (!_spdif_rx_analyze_capture(&samp_freq, &inverted)) {
+            _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
+            return;
+        }
+        state = SPDIF_RX_STATE_WAITING_STABLE;
+        _spdif_rx_decode_start(samp_freq, inverted);
+        waiting_start_time_ms = _millis();
+        setup_done = true;
+        _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
+        return;
     }
-    _clear_timer();
-    _spdif_rx_decode_end(); // this could be called before in isr
-    _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
+    // decode operation below here
+    { // Calculate samp_freq and check if it's stable
+        block_interval[block_count % NUM_AVE] = now_us - prev_time_us;
+        uint64_t accum = 0;
+        for (int i = 0; i < NUM_AVE; i++) {
+            accum += block_interval[i];
+        }
+        float ave_block_interval = (float) accum / NUM_AVE;
+        float bitrate_16b = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
+        samp_freq_actual = bitrate_16b / 32.0;
+        spdif_rx_samp_freq_t sf = SAMP_FREQ_NONE;
+        for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
+            if (samp_freq_actual >= (float) samp_freq_array[i] * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) samp_freq_array[i] * (1.0 + SF_CRITERIA)) {
+                sf = samp_freq_array[i];
+                break;
+            }
+        }
+        stable_freq_history = (stable_freq_history << 1) | (sf != SAMP_FREQ_NONE && sf == samp_freq);
+        uint32_t stable_mask = ((1ul << NUM_STABLE_FREQ) - 1);
+        stable_freq_flg = (stable_freq_history & stable_mask) == stable_mask;
+        if (setup_done && stable_freq_flg && block_aligned) {
+            state = SPDIF_RX_STATE_STABLE;
+        } else if (setup_done && stable_done && (!stable_freq_flg || !block_aligned)) {
+            state = SPDIF_RX_STATE_NO_SIGNAL;
+        }
+        samp_freq = sf;
+    }
+    block_count++;
+    if (proc_dma0) {
+        uint32_t done_ptr = _dma_done_and_restart(gcfg.dma_channel0, &dma_config0);
+        _check_block(_to_buff_ptr(done_ptr));
+    } else if (proc_dma1) {
+        uint32_t done_ptr = _dma_done_and_restart(gcfg.dma_channel1, &dma_config1);
+        _check_block(_to_buff_ptr(done_ptr));
+    }
+    // state transition in decode operation case
+    if (state == SPDIF_RX_STATE_STABLE) {
+        if (!stable_done) {
+            if (on_stable_func != NULL) {
+                on_stable_func(samp_freq);
+            }
+        }
+        stable_done = true;
+        _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
+    } else if (state == SPDIF_RX_STATE_WAITING_STABLE && now_ms < waiting_start_time_ms + decode_wait_stable_ms) {
+        _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
+    } else {
+        _spdif_rx_decode_timeout(gcfg.alarm); // call decode timeout target directly
+    }
+    prev_time_us = now_us;
 }
 
 // === Public functions ===
@@ -692,6 +663,12 @@ void spdif_rx_start(const spdif_rx_config_t *config)
     state = SPDIF_RX_STATE_NO_SIGNAL;
     memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
     _spdif_rx_capture_retry(gcfg.alarm); // at first, call capture retry timeout target directly
+}
+
+void spdif_rx_end()
+{
+    _spdif_rx_common_end();
+    state = SPDIF_RX_STATE_NO_SIGNAL;
 }
 
 void spdif_rx_set_callback_on_stable(void (*func)(spdif_rx_samp_freq_t samp_freq))

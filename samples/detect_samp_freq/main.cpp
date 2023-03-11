@@ -83,24 +83,6 @@ int main()
         tight_loop_contents();
         sleep_ms(1000);
     }
-    /*
-    spdif_rx_set_config(&config);
-    while (true) {
-        spdif_rx_status_t status = spdif_rx_get_status();
-        if (status == SPDIF_RX_STATUS_STABLE) {
-            uint32_t samp_freq = spdif_rx_get_samp_freq();
-            float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-            printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
-            printf("c_bits = 0x%08x\n", spdif_rx_get_c_bits());
-            printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
-        } else if (status == SPDIF_RX_STATUS_NO_SIGNAL) {
-            printf("stable sync not detected\n");
-            spdif_rx_search();
-        }
-        tight_loop_contents();
-        sleep_ms(1000);
-    }
-    */
 
     return 0;
 }
