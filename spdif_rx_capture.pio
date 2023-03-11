@@ -6,7 +6,7 @@
 ; sampled data is used for detection of sampling frequency
 
 ; ==============================================================================================
-.program spdif_rx_detect
+.program spdif_rx_capture
 
 public entry_point:
     set x, 31
@@ -29,12 +29,13 @@ loop_wait_toggle:
 ; ==============================================================================================
 % c-sdk {
 
-static inline void spdif_rx_detect_program_init(PIO pio, uint sm, uint offset, uint pin) {
+static inline void spdif_rx_capture_program_init(PIO pio, uint sm, uint offset, uint entry_point, pio_sm_config (*get_default_config)(uint), uint pin)
+{
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);
     gpio_pull_down(pin);
 
-    pio_sm_config sm_config = spdif_rx_detect_program_get_default_config(offset);
+    pio_sm_config sm_config = get_default_config(offset);
 
     sm_config_set_clkdiv(&sm_config, 1);
     sm_config_set_jmp_pin(&sm_config, pin);
@@ -49,7 +50,7 @@ static inline void spdif_rx_detect_program_init(PIO pio, uint sm, uint offset, u
 
     pio_sm_set_enabled(pio, sm, true);
 
-    pio_sm_exec(pio, sm, pio_encode_jmp(offset + spdif_rx_detect_offset_entry_point));
+    pio_sm_exec(pio, sm, pio_encode_jmp(offset + entry_point));
 }
 
 %}

@@ -34,6 +34,18 @@ void measure_freqs(void) {
     // Can't measure clk_ref / xosc as it is the ref
 }
 
+void on_stable_func(spdif_rx_samp_freq_t samp_freq)
+{
+    // callback function should be returned as quick as possible
+    printf("detected stable sync\n");
+}
+
+void on_lost_stable_func()
+{
+    // callback function should be returned as quick as possible
+    printf("lost stable sync. waiting for signal\n");
+}
+
 int main()
 {
     stdio_init_all();
@@ -52,11 +64,27 @@ int main()
         .pio_sm = 0,
         .dma_channel0 = 0,
         .dma_channel1 = 1,
+        .alarm = 0,
         .full_check = true
     };
 
-    spdif_rx_set_config(&config);
+    spdif_rx_start(&config);
+    spdif_rx_set_callback_on_stable(on_stable_func);
+    spdif_rx_set_callback_on_lost_stable(on_lost_stable_func);
 
+    while (true) {
+        if (spdif_rx_get_state() == SPDIF_RX_STATE_STABLE) {
+            spdif_rx_samp_freq_t samp_freq = spdif_rx_get_samp_freq();
+            float samp_freq_actual = spdif_rx_get_samp_freq_actual();
+            printf("Samp Freq = %d Hz (%7.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
+            printf("c_bits = 0x%08x\n", spdif_rx_get_c_bits());
+            printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
+        }
+        tight_loop_contents();
+        sleep_ms(1000);
+    }
+    /*
+    spdif_rx_set_config(&config);
     while (true) {
         spdif_rx_status_t status = spdif_rx_get_status();
         if (status == SPDIF_RX_STATUS_STABLE) {
@@ -72,6 +100,7 @@ int main()
         tight_loop_contents();
         sleep_ms(1000);
     }
+    */
 
     return 0;
 }
