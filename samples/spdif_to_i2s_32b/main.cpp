@@ -19,6 +19,7 @@ static constexpr int32_t DAC_ZERO = 1;
 static int16_t buf_s16[SAMPLES_PER_BUFFER*2]; // 16bit 2ch data before applying volume
 static audio_buffer_pool_t* ap = nullptr;
 static bool decode_flg = false;
+static bool i2c_setup_flg = false;
 
 #define audio_pio __CONCAT(pio, PICO_AUDIO_I2S_PIO)
 
@@ -247,11 +248,23 @@ void i2s_callback_func()
     }
 }
 
-static bool i2c_setup = false;
+void i2c_setup(spdif_rx_samp_freq_t samp_freq)
+{
+    float samp_freq_actual = spdif_rx_get_samp_freq_actual();
+    uint32_t c_bits = spdif_rx_get_c_bits();
+    printf("Samp Freq = %d Hz (%6.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
+    printf("SPDIF C bits = %08x\n", c_bits);
+    if (ap != nullptr) {
+        i2s_audio_deinit(); // deinit needs to be done when input is stable
+    }
+    i2s_audio_init(samp_freq);
+}
+
 void on_stable_func(spdif_rx_samp_freq_t samp_freq)
 {
     // callback function should be returned as quick as possible
-    i2c_setup = true;
+    i2c_setup_flg = true;
+    //i2c_setup(samp_freq);
 }
 
 void on_lost_stable_func()
@@ -278,17 +291,10 @@ int main()
     spdif_rx_set_callback_on_lost_stable(on_lost_stable_func);
 
     while (true) {
-        if (i2c_setup) {
-            i2c_setup = false;
+        if (i2c_setup_flg) {
+            i2c_setup_flg = false;
             spdif_rx_samp_freq_t samp_freq = spdif_rx_get_samp_freq();
-            float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-            uint32_t c_bits = spdif_rx_get_c_bits();
-            printf("Samp Freq = %d Hz (%6.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
-            printf("SPDIF C bits = %08x\n", c_bits);
-            if (ap != nullptr) {
-                i2s_audio_deinit(); // deinit needs to be done when input is stable
-            }
-            i2s_audio_init(samp_freq);
+            i2c_setup(samp_freq);
         }
         int c = getchar_timeout_us(0);
         if (c) {

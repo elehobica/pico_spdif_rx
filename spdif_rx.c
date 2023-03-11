@@ -342,6 +342,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
         dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1);
         proc_dma1 = true;
     }
+    // state transition in capture operation case
     if (state == SPDIF_RX_STATE_NO_SIGNAL) {
         spdif_rx_samp_freq_t samp_freq;
         bool inverted;
@@ -354,7 +355,10 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
         _spdif_rx_decode_start(samp_freq, inverted);
         waiting_start_time_ms = _millis();
         setup_done = true;
+        _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
+        return;
     }
+    // decode operation below here
     { // Calculate samp_freq and check if it's stable
         block_interval[block_count % NUM_AVE] = now_us - prev_time_us;
         uint64_t accum = 0;
@@ -376,19 +380,12 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
         stable_freq_flg = (stable_freq_history & stable_mask) == stable_mask;
         if (setup_done && stable_freq_flg && block_aligned) {
             state = SPDIF_RX_STATE_STABLE;
-            if (!stable_done) {
-                if (on_stable_func != NULL) {
-                    on_stable_func(sf);
-                }
-            }
-            stable_done = true;
         } else if (setup_done && stable_done && (!stable_freq_flg || !block_aligned)) {
             state = SPDIF_RX_STATE_NO_SIGNAL;
         }
         samp_freq = sf;
     }
     block_count++;
-
     if (proc_dma0) {
         uint32_t done_ptr = _dma_done_and_restart(gcfg.dma_channel0, &dma_config0);
         _check_block(_to_buff_ptr(done_ptr));
@@ -396,7 +393,16 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
         uint32_t done_ptr = _dma_done_and_restart(gcfg.dma_channel1, &dma_config1);
         _check_block(_to_buff_ptr(done_ptr));
     }
-    if (state == SPDIF_RX_STATE_STABLE || (state == SPDIF_RX_STATE_WAITING_STABLE && now_ms < waiting_start_time_ms + decode_wait_stable_ms)) {
+    // state transition in decode operation case
+    if (state == SPDIF_RX_STATE_STABLE) {
+        if (!stable_done) {
+            if (on_stable_func != NULL) {
+                on_stable_func(samp_freq);
+            }
+        }
+        stable_done = true;
+        _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
+    } else if (state == SPDIF_RX_STATE_WAITING_STABLE && now_ms < waiting_start_time_ms + decode_wait_stable_ms) {
         _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
     } else {
         _spdif_rx_decode_timeout(gcfg.alarm); // call decode timeout target directly
