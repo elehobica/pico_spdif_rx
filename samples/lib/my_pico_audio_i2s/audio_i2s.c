@@ -545,8 +545,7 @@ bool audio_i2s_connect_s8(audio_buffer_pool_t *producer) {
 }
 
 static inline void audio_start_dma_transfer(uint8_t dma_channel, dma_channel_config *dma_config, audio_buffer_t **playing_buffer) {
-    assert(!shared_state.playing_buffer0);
-    assert(!shared_state.playing_buffer1);
+    assert(!*playing_buffer);
 
     #ifdef WATCH_DMA_TRANSFER_INTERVAL
     static uint32_t latest = 0;
