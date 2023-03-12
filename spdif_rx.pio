@@ -16,12 +16,12 @@
 ;
 ; [SPDIF Sub Frame Format] (64 symbols)
 ; 16bit Audio Format
-; Sync (8) + AUX (8) + '0' (8) + 16bit Audio (32) + VUCP (8)
+; Sync (8) + AUX (8) + '0000' (8) + 16bit Audio (32) + VUCP (8)
 ; 24bit Audio Format
 ; Sync (8) + 24bit Audio (48) + VUCP (8)
 ;
 ; Audio data
-;  Audio data appears from left side as LSB to right side as MSB
+;  Audio data appears from LSB earlier to MSB later
 ;
 ; VUCP
 ;  P: parity should be checked every sub frame (checking 27bits excluded sync and P out of 32 bits )
@@ -49,18 +49,18 @@
 ; PIO outputs (bit order is opposite to SPDIF format for easy copy of audio data)
 ;
 ; 16bit Audio Format
-; PCUV (4) + 16bit Audio (16) + '0' (4) + AUX (4) + Sync (4)
+; PCUV (4) + 16bit Audio (16) + '0000' (4) + AUX (4) + Sync (4)
 ; 24bit Audio Format
 ; PCUV (4) + 24bit Audio (24) + Sync (4)
 ;
 ;  0b0  : bit0 (symbol_00 or symbol_11)
 ;  0b1  : bit1 (symbol_10 or symbol_01)
-;  0b11 : syncE (symbol_1110) or sync8 (symbol_1000)  (can't distinguish)
+;  0b11 : syncE, sync1 (symbol_1110, symbol_0001) or sync8, sync7 (symbol_1000, symbol_0111)  (can't distinguish)
 ;
 ;  thus Sync Code will consist of as follows
-;   0b1111 : Sync Code B (sync E8) (syncE -> sync8)
-;   0b1011 : Sync Code M (sync E2) (syncE -> bit0 -> bit1)
-;   0b0111 : Sync Code W (sync E4) (syncE -> bit1 -> bit0)
+;   0b1111 : Sync Code B (sync E8 or sync 17) (syncE -> sync8  or  sync1 -> sync7)
+;   0b1011 : Sync Code M (sync E2 or sync 1D) (syncE -> bit0 -> bit1  or  sync1 -> bit0 -> bit1)
+;   0b0111 : Sync Code W (sync E4 or sync 1B) (syncE -> bit1 -> bit0  or  sync1 -> bit1 -> bit0)
 ;
 ;  audio data can be extracted as follows
 ;   16bit audio data: from 5th bit to 21st bit in MSB to LSB order (signed)
