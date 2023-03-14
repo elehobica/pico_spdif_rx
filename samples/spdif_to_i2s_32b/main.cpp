@@ -255,7 +255,7 @@ void i2s_setup(spdif_rx_samp_freq_t samp_freq)
     printf("Samp Freq = %d Hz (%6.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
     printf("SPDIF C bits = %08x\n", c_bits);
     if (ap != nullptr) {
-        i2s_audio_deinit(); // deinit needs to be done when input is stable
+        i2s_audio_deinit(); // less gap noise if deinit() is done when input is stable
     }
     i2s_audio_init(samp_freq);
 }
@@ -264,7 +264,6 @@ void on_stable_func(spdif_rx_samp_freq_t samp_freq)
 {
     // callback function should be returned as quick as possible
     i2s_setup_flg = true;
-    //i2s_setup(samp_freq);
 }
 
 void on_lost_stable_func()
