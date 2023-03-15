@@ -87,8 +87,10 @@ int main()
         if (count % 100 == 0 && spdif_rx_get_state() == SPDIF_RX_STATE_STABLE) {
             spdif_rx_samp_freq_t samp_freq = spdif_rx_get_samp_freq();
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
+            uint32_t c_bits;
+            spdif_rx_get_c_bits(&c_bits, sizeof(c_bits), 0);
             printf("Samp Freq = %d Hz (%7.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
-            printf("c_bits = 0x%08x\n", spdif_rx_get_c_bits());
+            printf("c_bits = 0x%08x\n", c_bits);
             printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
         }
         tight_loop_contents();

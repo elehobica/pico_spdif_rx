@@ -70,7 +70,7 @@ void spdif_rx_set_callback_on_lost_stable(void (*func)());
 spdif_rx_state_t spdif_rx_get_state();
 float spdif_rx_get_samp_freq_actual();
 spdif_rx_samp_freq_t spdif_rx_get_samp_freq();
-uint32_t spdif_rx_get_c_bits();
+void spdif_rx_get_c_bits(void* ptr, size_t size, uint32_t offset);
 uint32_t spdif_rx_get_parity_err_count();
 uint32_t spdif_rx_get_fifo_count();
 uint32_t spdif_rx_read_fifo(uint32_t** buff, uint32_t req_count);
