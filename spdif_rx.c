@@ -404,44 +404,44 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
 
     // sampled data analysis to calculate min_width, max_width, max_edge_interval for both 0 and 1
     const int SC = 1; // sample criteria
-    int edge_interval[2] = {0, 0};
-    int min_width[2] = {256, 256};
-    //int max_width[2] = {0, 0}; // not needed for frequency detection
+    int edge_pos[2] = {0, 0}; // unknown
     int max_edge_interval[2] = {0, 0};
+    int min_edge_interval = 0xFFFF;
     {
         //for (int i = 0; i < SPDIF_RX_DETECT_SIZE; i++) printf("data[%3d] = %032b\n", i, fifo_buff[i]);
-        int succ = 0;
-        int cur = 1;
+        int pos = 0; // current bit position in buffer
+        int cur = 1; // edge toggle, PIO sample started with a rising edge
         int num_check_words = SPDIF_RX_DETECT_SIZE;
         uint32_t shift_reg = fifo_buff[0];
-        int bit_pos = 0;
+        int bit_pos = 0; // position within current dword
         int word_idx = 0;
         while (true) {
             int r = __builtin_clz((cur) ? ~shift_reg : shift_reg); // leading zeros
-            if (r + bit_pos <= 31) { // within 32bit
-                succ += r;
-                int next = 1 - cur;
-                if (min_width[cur] > succ) {
-                    min_width[cur] = succ;
-                    // early termination by min_width (the higher frequency, the fewer samples for equivalent number of frames)
-                    if (min_width[cur] < SYSTEM_CLK_FREQUENCY / SAMP_FREQ_192000 / 128 - SC) {
-                        break; // no hope in this case, force termination
-                    } else if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_176400 / 128 + SC) {
-                        num_check_words = SPDIF_RX_DETECT_SIZE / 4;
-                    } else if (min_width[cur] <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_88200 / 128 + SC) {
-                        num_check_words = SPDIF_RX_DETECT_SIZE / 2;
+            if (r + bit_pos <= 31) { // found within remaining part of 32bit dword?
+                pos += r; // go to the found edge position
+                cur = 1 - cur; // toggle to other edge index
+                if (edge_pos[cur]) { // valid previous edge?
+                    int distance = pos - edge_pos[cur];
+                    if (max_edge_interval[cur] < distance) {
+                        max_edge_interval[cur] = distance;
+                    }
+                    if (min_edge_interval > distance) {
+                        min_edge_interval = distance;
+                        // early termination by min_width (the higher frequency, the fewer samples for equivalent number of frames)
+                        if (min_edge_interval < SYSTEM_CLK_FREQUENCY / SAMP_FREQ_192000 * 2 / 128 - SC) {
+                            break; // no hope in this case, force termination
+                        } else if (min_edge_interval <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_176400 * 2 / 128 + SC) {
+                            num_check_words = SPDIF_RX_DETECT_SIZE / 4;
+                        } else if (min_edge_interval <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_88200 * 2 / 128 + SC) {
+                            num_check_words = SPDIF_RX_DETECT_SIZE / 2;
+                        }
                     }
                 }
-                //if (max_width[cur] < succ) max_width[cur] = succ;
-                if (max_edge_interval[next] < edge_interval[next] + succ) max_edge_interval[next] = edge_interval[next] + succ;
-                edge_interval[next] = 0; // this edge
-                edge_interval[cur] += succ; // other edge
+                edge_pos[cur] = pos; // other edge
                 shift_reg <<= r;
                 bit_pos += r;
-                succ = 0;
-                cur = next;
             } else { // otherwise go first bit in next 32bit
-                succ += 32 - bit_pos;
+                pos += 32 - bit_pos;
                 bit_pos = 0;
                 word_idx++;
                 if (word_idx >= num_check_words) { // end of analysis
@@ -450,7 +450,7 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
                 shift_reg = fifo_buff[word_idx];
             }
         }
-        //printf("min0 = %d, max_edge0 = %d, min1 = %d, max_edge1 = %d\n", min_width[0], max_edge_interval[0], min_width[1], max_edge_interval[1]);
+        //printf("min_edge = %d, max_edge0 = %d, max_edge1 = %d\n", min_edge_interval, max_edge_interval[0], max_edge_interval[1]);
 
         if (word_idx < num_check_words) { // force termination
             return 0;
@@ -460,8 +460,8 @@ int spdif_rx_detect(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
     // evaluate analysis result to confirm if it meets criteria of sampling frequencies
     for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
         // check if minimum width meets
-        int min_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] / 128; // symbol cycle
-        if ((min_width[0] >= min_exp - SC && min_width[0] <= min_exp + SC) && (min_width[1] >= min_exp - SC && min_width[1] <= min_exp + SC)) {
+        int min_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] * 2 / 128; // symbol cycle
+        if ((min_edge_interval >= min_exp - SC) && (min_edge_interval <= min_exp + SC)) {
             // Judge polarity: thanks to great idea by IDC-Dragon
             // focusing on Sync Code M which appears in L sub-frame (except for head frame in the block)
             //                                                                      |<--------->|
