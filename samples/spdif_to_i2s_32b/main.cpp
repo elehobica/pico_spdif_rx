@@ -19,7 +19,8 @@ static constexpr int32_t DAC_ZERO = 1;
 static int16_t buf_s16[SAMPLES_PER_BUFFER*2]; // 16bit 2ch data before applying volume
 static audio_buffer_pool_t* ap = nullptr;
 static bool decode_flg = false;
-static bool i2s_setup_flg = false;
+volatile static bool i2s_setup_flg = false;
+volatile static bool i2s_cancel_flg = false;
 
 #define audio_pio __CONCAT(pio, PICO_AUDIO_I2S_PIO)
 
@@ -257,19 +258,30 @@ void i2s_setup(spdif_rx_samp_freq_t samp_freq)
     if (ap != nullptr) {
         i2s_audio_deinit(); // less gap noise if deinit() is done when input is stable
     }
+    // need to care the case when lost during setup to avoid noise
+    if (i2s_cancel_flg) { return; }
+
     i2s_audio_init(samp_freq);
+
+    // need to care the case when lost during setup to avoid noise
+    if (i2s_cancel_flg) {
+        if (ap != nullptr) {
+            i2s_audio_deinit();
+        }
+    }
 }
 
 void on_stable_func(spdif_rx_samp_freq_t samp_freq)
 {
     // callback function should be returned as quick as possible
     i2s_setup_flg = true;
+    i2s_cancel_flg = false;
 }
 
 void on_lost_stable_func()
 {
     // callback function should be returned as quick as possible
-    printf("lost stable sync. waiting for signal\n");
+    i2s_cancel_flg = true;
 }
 
 int main()
@@ -292,8 +304,7 @@ int main()
     while (true) {
         if (i2s_setup_flg) {
             i2s_setup_flg = false;
-            spdif_rx_samp_freq_t samp_freq = spdif_rx_get_samp_freq();
-            i2s_setup(samp_freq);
+            i2s_setup(spdif_rx_get_samp_freq());
         }
         int c = getchar_timeout_us(0);
         if (c) {

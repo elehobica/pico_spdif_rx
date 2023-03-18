@@ -11,6 +11,8 @@
 
 static constexpr uint8_t PIN_DCDC_PSM_CTRL = 23;
 static constexpr uint8_t PIN_PICO_SPDIF_RX_DATA = 15;
+volatile static bool stable_flg = false;
+volatile static bool lost_stable_flg = false;
 
 void measure_freqs(void) {
     uint f_pll_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_PLL_SYS_CLKSRC_PRIMARY);
@@ -37,13 +39,13 @@ void measure_freqs(void) {
 void on_stable_func(spdif_rx_samp_freq_t samp_freq)
 {
     // callback function should be returned as quick as possible
-    printf("detected stable sync\n");
+    stable_flg = true;
 }
 
 void on_lost_stable_func()
 {
     // callback function should be returned as quick as possible
-    printf("lost stable sync. waiting for signal\n");
+    lost_stable_flg = true;
 }
 
 int main()
@@ -72,8 +74,17 @@ int main()
     spdif_rx_set_callback_on_stable(on_stable_func);
     spdif_rx_set_callback_on_lost_stable(on_lost_stable_func);
 
+    int count = 0;
     while (true) {
-        if (spdif_rx_get_state() == SPDIF_RX_STATE_STABLE) {
+        if (stable_flg) {
+            stable_flg = false;
+            printf("detected stable sync\n");
+        }
+        if (lost_stable_flg) {
+            lost_stable_flg = false;
+            printf("lost stable sync. waiting for signal\n");
+        }
+        if (count % 100 == 0 && spdif_rx_get_state() == SPDIF_RX_STATE_STABLE) {
             spdif_rx_samp_freq_t samp_freq = spdif_rx_get_samp_freq();
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
             printf("Samp Freq = %d Hz (%7.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
@@ -81,7 +92,8 @@ int main()
             printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
         }
         tight_loop_contents();
-        sleep_ms(1000);
+        sleep_ms(10);
+        count++;
     }
 
     return 0;
