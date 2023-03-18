@@ -4,7 +4,7 @@ if (NOT TARGET spdif_rx)
     pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_48000.pio)
     pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_96000.pio)
     pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_192000.pio)
-    pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_LIST_DIR}/spdif_rx_detect.pio)
+    pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_LIST_DIR}/spdif_rx_capture.pio)
 
     add_custom_command(
         OUTPUT

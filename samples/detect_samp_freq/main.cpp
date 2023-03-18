@@ -11,6 +11,8 @@
 
 static constexpr uint8_t PIN_DCDC_PSM_CTRL = 23;
 static constexpr uint8_t PIN_PICO_SPDIF_RX_DATA = 15;
+volatile static bool stable_flg = false;
+volatile static bool lost_stable_flg = false;
 
 void measure_freqs(void) {
     uint f_pll_sys = frequency_count_khz(CLOCKS_FC0_SRC_VALUE_PLL_SYS_CLKSRC_PRIMARY);
@@ -34,6 +36,18 @@ void measure_freqs(void) {
     // Can't measure clk_ref / xosc as it is the ref
 }
 
+void on_stable_func(spdif_rx_samp_freq_t samp_freq)
+{
+    // callback function should be returned as quick as possible
+    stable_flg = true;
+}
+
+void on_lost_stable_func()
+{
+    // callback function should be returned as quick as possible
+    lost_stable_flg = true;
+}
+
 int main()
 {
     stdio_init_all();
@@ -52,25 +66,34 @@ int main()
         .pio_sm = 0,
         .dma_channel0 = 0,
         .dma_channel1 = 1,
+        .alarm = 0,
         .full_check = true
     };
 
-    spdif_rx_set_config(&config);
+    spdif_rx_start(&config);
+    spdif_rx_set_callback_on_stable(on_stable_func);
+    spdif_rx_set_callback_on_lost_stable(on_lost_stable_func);
 
+    int count = 0;
     while (true) {
-        spdif_rx_status_t status = spdif_rx_get_status();
-        if (status == SPDIF_RX_STATUS_STABLE) {
-            uint32_t samp_freq = spdif_rx_get_samp_freq();
+        if (stable_flg) {
+            stable_flg = false;
+            printf("detected stable sync\n");
+        }
+        if (lost_stable_flg) {
+            lost_stable_flg = false;
+            printf("lost stable sync. waiting for signal\n");
+        }
+        if (count % 100 == 0 && spdif_rx_get_state() == SPDIF_RX_STATE_STABLE) {
+            spdif_rx_samp_freq_t samp_freq = spdif_rx_get_samp_freq();
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-            printf("Samp Freq = %d Hz (%7.4f KHz)\n", samp_freq, samp_freq_actual / 1e3);
+            printf("Samp Freq = %d Hz (%7.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
             printf("c_bits = 0x%08x\n", spdif_rx_get_c_bits());
             printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
-        } else if (status == SPDIF_RX_STATUS_NO_SIGNAL) {
-            printf("stable sync not detected\n");
-            spdif_rx_search();
         }
         tight_loop_contents();
-        sleep_ms(1000);
+        sleep_ms(10);
+        count++;
     }
 
     return 0;
