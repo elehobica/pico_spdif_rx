@@ -81,7 +81,7 @@
 .define lp cy/2
 
 ; assuming osr register is configured as below
-;   osr: 0x00000003
+;   osr: 0xFFFFFFFF (only LSB 2 bits are used to emit 0b1 or 0b11)
 
 public entry_point:
     wait 0 pin 0

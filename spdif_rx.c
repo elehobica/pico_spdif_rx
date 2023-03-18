@@ -149,9 +149,8 @@ static inline void _spdif_rx_program_init(PIO pio, uint sm, uint offset, uint en
 
     // set OSR (use as fixed value)
     pio_sm_set_enabled(pio, sm, false);
-    pio_sm_exec(pio, sm, pio_encode_set(pio_x, 0x3));
-    pio_sm_exec(pio, sm, pio_encode_mov(pio_osr, pio_x)); // osr = 0x3
-    pio_sm_exec(pio, sm, pio_encode_set(pio_x, 0x0)); // revert x = 0, just in case
+    pio_sm_exec(pio, sm, pio_encode_set(pio_x, 0x0)); // only for copying to osr
+    pio_sm_exec(pio, sm, pio_encode_mov_not(pio_osr, pio_x)); // osr = 0xFFFFFFFF
     pio_sm_set_enabled(pio, sm, true);
 
     pio_sm_exec(pio, sm, pio_encode_jmp(offset + entry_point));
