@@ -252,7 +252,8 @@ void i2s_callback_func()
 void i2s_setup(spdif_rx_samp_freq_t samp_freq)
 {
     float samp_freq_actual = spdif_rx_get_samp_freq_actual();
-    uint32_t c_bits = spdif_rx_get_c_bits();
+    uint32_t c_bits;
+    spdif_rx_get_c_bits(&c_bits, sizeof(c_bits), 0);
     printf("Samp Freq = %d Hz (%6.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
     printf("SPDIF C bits = %08x\n", c_bits);
     if (ap != nullptr) {

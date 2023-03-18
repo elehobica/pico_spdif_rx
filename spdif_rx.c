@@ -104,7 +104,7 @@ static spdif_rx_samp_freq_t samp_freq;
 static uint32_t stable_freq_history;
 static bool stable_freq_flg;
 static uint trans_count = SPDIF_BLOCK_SIZE;
-static uint32_t c_bits;
+static uint8_t c_bits[SPDIF_BLOCK_SIZE / 16];
 static uint32_t parity_err_count;
 
 // prototype declaration
@@ -169,7 +169,7 @@ static inline uint32_t* _to_buff_ptr(uint32_t ptr)
 
 // default spdif_rx block callback function (you may override at external)
 __attribute__((weak))
-void spdif_rx_callback_func(uint32_t *buff, uint32_t sub_frame_count, uint32_t c_bits, bool parity_err)
+void spdif_rx_callback_func(uint32_t *buff, uint32_t sub_frame_count, uint8_t c_bits[SPDIF_BLOCK_SIZE / 16], bool parity_err)
 {
     return;
 }
@@ -178,8 +178,9 @@ static int _check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
 {
     uint pos_syncB = 0;
     uint32_t block_parity_err_count = 0;
-    uint32_t block_cbits = 0;
-    uint32_t cbit_mask = 0x1; // start with LSB
+    uint8_t c_bits_raw[SPDIF_BLOCK_SIZE / 16];
+    uint8_t c_bit_pos = 0x1; // start with LSB
+    uint8_t c_bits_byte = 0;
 
     for (int i = 0; i < SPDIF_BLOCK_SIZE; i++) {
         uint32_t sync = buff[i] & 0xf;
@@ -196,12 +197,18 @@ static int _check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
                 return true;
             }
             // VUCP handling
-            // C bits (heading 32bit only)
-            if (i % 2 == 0 && cbit_mask) { // using even sub frame of heading 32 frames of each block
-                if (buff[i] & (0x1<<30)) {
-                    block_cbits |= cbit_mask;
+            // C bits (whole 192 bits)
+            if (i % 2 == 0) { // using even sub frame of each block
+                if (buff[i] & (0x1 << 30)) {
+                    c_bits_byte |= c_bit_pos;
                 }
-                cbit_mask <<= 1; // will become 0 after 32 bits are collected, and stop the if()
+                if (c_bit_pos >> 7) { // top boundary bit of each byte
+                    c_bits_raw[i / 16] = c_bits_byte;
+                    c_bits_byte = 0;
+                    c_bit_pos = 0x1; // restart with LSB
+                } else {
+                    c_bit_pos <<= 1;
+                }
             }
 
             // Parity (27 bits of every sub frame)
@@ -219,7 +226,7 @@ static int _check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
     parity_err_count += block_parity_err_count;
     // block align adjustment
     if (block_aligned) {
-        c_bits = block_cbits; // copy what's been collected
+        memcpy(c_bits, c_bits_raw, sizeof(c_bits)); // copy what's been collected
         trans_count = SPDIF_BLOCK_SIZE;
         if (spdif_rx_get_samp_freq() != SAMP_FREQ_NONE) {
             spdif_rx_callback_func(buff, trans_count, c_bits, block_parity_err_count > 0);
@@ -498,7 +505,7 @@ static void _spdif_rx_decode_start(spdif_rx_samp_freq_t samp_freq, bool inverted
     stable_freq_history = 0;
     stable_freq_flg = false;
     trans_count = SPDIF_BLOCK_SIZE;
-    c_bits = 0;
+    memset(c_bits, 0, sizeof(c_bits));
     parity_err_count = 0;
 
     // === DMA configuration ===
@@ -693,9 +700,17 @@ spdif_rx_samp_freq_t spdif_rx_get_samp_freq()
     return samp_freq;
 }
 
-uint32_t spdif_rx_get_c_bits()
+void spdif_rx_get_c_bits(void* ptr, size_t size, uint32_t offset)
 {
-    return c_bits;
+    uint32_t save = save_and_disable_interrupts(); // to avoid getting incomplete set of c_bits
+    uint8_t* bptr = (uint8_t*) ptr;
+    for (int i = 0; i < size; i++) {
+        if (offset + i >= SPDIF_BLOCK_SIZE / 16) {
+            break;
+        }
+        bptr[i] = c_bits[offset + i];
+    }
+    restore_interrupts(save);
 }
 
 uint32_t spdif_rx_get_parity_err_count()
