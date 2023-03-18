@@ -62,7 +62,7 @@ typedef enum _spdif_rx_state_t  {
 #define NUM_BLOCKS (8) // must be >= 2
 #define SPDIF_RX_FIFO_SIZE (NUM_BLOCKS * SPDIF_BLOCK_SIZE)
 
-void spdif_rx_start(const spdif_rx_config_t *config);
+void spdif_rx_start(const spdif_rx_config_t* config);
 void spdif_rx_end();
 void spdif_rx_set_callback_on_stable(void (*func)(spdif_rx_samp_freq_t samp_freq));
 void spdif_rx_set_callback_on_lost_stable(void (*func)());

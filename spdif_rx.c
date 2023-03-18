@@ -46,7 +46,7 @@ typedef enum _spdif_rx_pio_program_id_t  {
 
 typedef struct {
     const spdif_rx_pio_program_id_t id;
-    const pio_program_t *program;
+    const pio_program_t* program;
     uint offset;
     uint entry_point;
     pio_sm_config (*get_default_config)(uint);
@@ -92,7 +92,7 @@ static dma_channel_config dma_config1;
 
 static bool setup_done = false;
 static bool stable_done = false;
-static spdif_rx_pio_program_t *current_pg;
+static spdif_rx_pio_program_t* current_pg;
 static int block_count;
 static uint64_t prev_time_us = 0;
 static uint32_t waiting_start_time_ms = 0;
@@ -168,7 +168,7 @@ static inline uint32_t* _to_buff_ptr(uint32_t ptr)
 
 // default spdif_rx block callback function (you may override at external)
 __attribute__((weak))
-void spdif_rx_callback_func(uint32_t *buff, uint32_t sub_frame_count, uint8_t c_bits[SPDIF_BLOCK_SIZE / 16], bool parity_err)
+void spdif_rx_callback_func(uint32_t* buff, uint32_t sub_frame_count, uint8_t c_bits[SPDIF_BLOCK_SIZE / 16], bool parity_err)
 {
     return;
 }
@@ -399,9 +399,9 @@ static void _spdif_rx_capture_retry(uint alarm_num)
     _set_timer_after_by_us(_spdif_rx_capture_timeout, 100);
 }
 
-static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t *samp_freq, bool *inverted)
+static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inverted)
 {
-    // sampled data analysis to calculate min_width, max_width, max_edge_interval for both 0 and 1
+    // sampled data analysis to calculate min_edge_interval, max_edge_interval for both 0 and 1
     const int SC = 1; // sample criteria
     int edge_pos[2] = {0, 0}; // unknown
     int max_edge_interval[2] = {0, 0};
@@ -426,7 +426,7 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t *samp_freq, bool *inve
                     }
                     if (min_edge_interval > distance) {
                         min_edge_interval = distance;
-                        // early termination by min_width (the higher frequency, the fewer samples for equivalent number of frames)
+                        // early termination by min_edge_interval (the higher frequency, the fewer samples for equivalent number of frames)
                         if (min_edge_interval < SYSTEM_CLK_FREQUENCY / SAMP_FREQ_192000 * 2 / 128 - SC) {
                             break; // no hope in this case, force termination
                         } else if (min_edge_interval <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_176400 * 2 / 128 + SC) {
@@ -661,7 +661,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
 
 // === Public functions ===
 
-void spdif_rx_start(const spdif_rx_config_t *config)
+void spdif_rx_start(const spdif_rx_config_t* config)
 {
     state = SPDIF_RX_STATE_NO_SIGNAL;
     memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
@@ -722,7 +722,7 @@ uint32_t spdif_rx_get_fifo_count()
     if (buff_wr_done_ptr >= buff_rd_ptr) {
         return buff_wr_done_ptr - buff_rd_ptr;
     } else {
-        return buff_wr_done_ptr + SPDIF_RX_FIFO_SIZE*2 - buff_rd_ptr;
+        return buff_wr_done_ptr + SPDIF_RX_FIFO_SIZE * 2 - buff_rd_ptr;
     }
 }
 
