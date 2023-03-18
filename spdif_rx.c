@@ -96,7 +96,7 @@ static spdif_rx_pio_program_t* current_pg;
 static int block_count;
 static uint64_t prev_time_us = 0;
 static uint32_t waiting_start_time_ms = 0;
-static uint64_t block_interval[NUM_AVE];
+static uint32_t block_interval[NUM_AVE];
 static bool block_aligned;
 static int block_align_count;
 static float samp_freq_actual;
@@ -609,8 +609,8 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
     }
     // decode operation below here
     { // Calculate samp_freq and check if it's stable
-        block_interval[block_count % NUM_AVE] = now_us - prev_time_us;
-        uint64_t accum = 0;
+        block_interval[block_count % NUM_AVE] = (uint32_t) (now_us - prev_time_us);
+        uint32_t accum = 0;
         for (int i = 0; i < NUM_AVE; i++) {
             accum += block_interval[i];
         }
