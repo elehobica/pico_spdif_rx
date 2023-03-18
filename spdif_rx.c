@@ -31,7 +31,6 @@
 
 #define DMA_IRQ_x __CONCAT(DMA_IRQ_, PICO_SPDIF_RX_DMA_IRQ)
 
-#define SF_CRITERIA (0.01)
 #define NUM_AVE (8)
 #define NUM_STABLE_FREQ (16) // 1 ~ 31
 
@@ -44,7 +43,7 @@ typedef enum _spdif_rx_pio_program_id_t  {
     SPDIF_RX_PIO_DECODE_192000,
 } spdif_rx_pio_program_id_t;
 
-typedef struct {
+typedef struct _spdif_rx_pio_program_t {
     const spdif_rx_pio_program_id_t id;
     const pio_program_t* program;
     uint offset;
@@ -59,24 +58,73 @@ static spdif_rx_pio_program_t program_sets[] = {
     {SPDIF_RX_PIO_DECODE_192000,     &spdif_rx_192000_program,     0, spdif_rx_192000_offset_entry_point,     spdif_rx_192000_program_get_default_config}
 };
 
-static const spdif_rx_samp_freq_t samp_freq_array[] = {
-    SAMP_FREQ_44100,
-    SAMP_FREQ_48000,
-    SAMP_FREQ_88200,
-    SAMP_FREQ_96000,
-    SAMP_FREQ_176400,
-    SAMP_FREQ_192000
+typedef enum _spdif_rx_samp_freq_id_t {
+    SAMP_FREQ_ID_44100 = 0,
+    SAMP_FREQ_ID_48000,
+    SAMP_FREQ_ID_88200,
+    SAMP_FREQ_ID_96000,
+    SAMP_FREQ_ID_176400,
+    SAMP_FREQ_ID_192000,
+    _NUM_SAMP_FREQ_IDS_
+} spdif_rx_samp_freq_id_t;
+
+typedef struct _spdif_rx_samp_freq_info_set_t {
+    const spdif_rx_samp_freq_id_t id;
+    const spdif_rx_samp_freq_t sf;
+    const int samp_freq_lower;
+    const int samp_freq_upper;
+    const int min_edge_interval_lower;
+    const int min_edge_interval_upper;
+    const int max_edge_interval_lower;
+    const int max_edge_interval_upper;
+} spdif_rx_samp_freq_info_set_t;
+
+#define GEN_SF_INFO_SET(sf) \
+    { \
+        SAMP_FREQ_ID_##sf, \
+        SAMP_FREQ_##sf, \
+        SAMP_FREQ_##sf *  99 / 100, \
+        SAMP_FREQ_##sf * 101 / 100, \
+        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 2 / 128) *  97 / 100, \
+        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 2 / 128) * 103 / 100, \
+        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 6 / 128) *  97 / 100, \
+        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 6 / 128) * 103 / 100 \
+    }
+// +- 3% is the range which doesn't overlap between near-by frequencies in symbol cycle length
+
+static const spdif_rx_samp_freq_info_set_t sf_info_sets[] = {
+    GEN_SF_INFO_SET(44100),
+    GEN_SF_INFO_SET(48000),
+    GEN_SF_INFO_SET(88200),
+    GEN_SF_INFO_SET(96000),
+    GEN_SF_INFO_SET(176400),
+    GEN_SF_INFO_SET(192000)
 };
+
+typedef enum _spdif_rx_samp_freq_criteria_check_t  {
+    CHK_SAMP_FREQ = 0,
+    CHK_SAMP_FREQ_LOWER_ONLY,
+    CHK_SAMP_FREQ_UPPER_ONLY,
+    CHK_MIN_EDGE_INTERVAL,
+    CHK_MIN_EDGE_INTERVAL_LOWER_ONLY,
+    CHK_MIN_EDGE_INTERVAL_UPPER_ONLY,
+    CHK_MAX_EDGE_INTERVAL,
+    CHK_MAX_EDGE_INTERVAL_LOWER_ONLY,
+    CHK_MAX_EDGE_INTERVAL_UPPER_ONLY
+} spdif_rx_samp_freq_criteria_check_t;
 
 // Sync codes which appears the output of decode PIO program
 static const uint32_t SYNC_B = 0b1111;
 static const uint32_t SYNC_M = 0b1011;
 static const uint32_t SYNC_W = 0b0111;
 
+// timer parameters
+static const uint32_t capture_retry_interval_ms = 100;
+static const uint32_t capture_timeout_us        = 100; // us
+static const uint32_t decode_wait_stable_ms     = 200;
+static const uint32_t decode_timeout_ms         = 10;
+
 static spdif_rx_state_t state;
-static uint32_t capture_retry_interval_ms = 100;
-static uint32_t decode_wait_stable_ms     = 200;
-static uint32_t decode_timeout_ms         = 10;
 
 static void (*on_stable_func)(spdif_rx_samp_freq_t samp_freq) = NULL;
 static void (*on_lost_stable_func)() = NULL;
@@ -301,12 +349,12 @@ static inline void _clear_timer()
     }
 }
 
-static inline void _set_timer_after_by_us(hardware_alarm_callback_t callback, uint64_t after_us)
+static inline void _set_timer_after_by_us(hardware_alarm_callback_t callback, uint32_t after_us)
 {
     _clear_timer();
     hardware_alarm_claim(gcfg.alarm);
     hardware_alarm_set_callback(gcfg.alarm, callback);
-    hardware_alarm_set_target(gcfg.alarm, delayed_by_us(get_absolute_time(), after_us));
+    hardware_alarm_set_target(gcfg.alarm, delayed_by_us(get_absolute_time(), (uint64_t) after_us));
 }
 
 static inline void _set_timer_after_by_ms(hardware_alarm_callback_t callback, uint32_t after_ms)
@@ -396,13 +444,40 @@ static void _spdif_rx_capture_retry(uint alarm_num)
 {
     _clear_timer();
     _spdif_rx_capture_start();
-    _set_timer_after_by_us(_spdif_rx_capture_timeout, 100);
+    _set_timer_after_by_us(_spdif_rx_capture_timeout, capture_timeout_us);
+}
+
+static bool _spdif_rx_check_criteria(int samp_freq_id, int value, spdif_rx_samp_freq_criteria_check_t check_type)
+{
+    const spdif_rx_samp_freq_info_set_t* sf_info = &sf_info_sets[samp_freq_id];
+    switch (check_type) {
+        case CHK_SAMP_FREQ:
+            return value >= sf_info->samp_freq_lower && value <= sf_info->samp_freq_upper;
+        case CHK_SAMP_FREQ_LOWER_ONLY:
+            return value >= sf_info->samp_freq_lower;
+        case CHK_SAMP_FREQ_UPPER_ONLY:
+            return value <= sf_info->samp_freq_upper;
+        case CHK_MIN_EDGE_INTERVAL:
+            return value >= sf_info->min_edge_interval_lower && value <= sf_info->min_edge_interval_upper;
+        case CHK_MIN_EDGE_INTERVAL_LOWER_ONLY:
+            return value >= sf_info->min_edge_interval_lower;
+        case CHK_MIN_EDGE_INTERVAL_UPPER_ONLY:
+            return value <= sf_info->min_edge_interval_upper;
+        case CHK_MAX_EDGE_INTERVAL:
+            return value >= sf_info->max_edge_interval_lower && value <= sf_info->max_edge_interval_upper;
+        case CHK_MAX_EDGE_INTERVAL_LOWER_ONLY:
+            return value >= sf_info->max_edge_interval_lower;
+        case CHK_MAX_EDGE_INTERVAL_UPPER_ONLY:
+            return value <= sf_info->max_edge_interval_upper;
+        default:
+            break;
+    }
+    return false;
 }
 
 static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inverted)
 {
     // sampled data analysis to calculate min_edge_interval, max_edge_interval for both 0 and 1
-    const int SC = 1; // sample criteria
     int edge_pos[2] = {0, 0}; // unknown
     int max_edge_interval[2] = {0, 0};
     int min_edge_interval = 0xFFFF;
@@ -427,11 +502,11 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inve
                     if (min_edge_interval > distance) {
                         min_edge_interval = distance;
                         // early termination by min_edge_interval (the higher frequency, the fewer samples for equivalent number of frames)
-                        if (min_edge_interval < SYSTEM_CLK_FREQUENCY / SAMP_FREQ_192000 * 2 / 128 - SC) {
+                        if (!_spdif_rx_check_criteria(SAMP_FREQ_ID_192000, min_edge_interval, CHK_MIN_EDGE_INTERVAL_LOWER_ONLY)) {
                             break; // no hope in this case, force termination
-                        } else if (min_edge_interval <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_176400 * 2 / 128 + SC) {
+                        } else if (_spdif_rx_check_criteria(SAMP_FREQ_ID_176400, min_edge_interval, CHK_MIN_EDGE_INTERVAL_UPPER_ONLY)) {
                             num_check_words = SPDIF_RX_CAPTURE_SIZE / 4;
-                        } else if (min_edge_interval <= SYSTEM_CLK_FREQUENCY / SAMP_FREQ_88200 * 2 / 128 + SC) {
+                        } else if (_spdif_rx_check_criteria(SAMP_FREQ_ID_88200, min_edge_interval, CHK_MIN_EDGE_INTERVAL_UPPER_ONLY)) {
                             num_check_words = SPDIF_RX_CAPTURE_SIZE / 2;
                         }
                     }
@@ -457,22 +532,26 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inve
     }
 
     // evaluate analysis result to confirm if it meets criteria of sampling frequencies
-    for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
-        // check if minimum width meets
-        int min_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] * 2 / 128; // symbol cycle
-        if ((min_edge_interval >= min_exp - SC) && (min_edge_interval <= min_exp + SC)) {
-            // Judge polarity: thanks to great idea by IDC-Dragon
+    // use the interval of same edges which is free from signal transition difference between rising and falling
+    for (int sf_id = 0; sf_id < _NUM_SAMP_FREQ_IDS_; sf_id++) {
+        // Judge frequency: thanks to great idea by IDC-Dragon
+        // focusing on Sync Code M which appears in L sub-frame (except for head frame in the block)
+        //                                                                            |<---->|
+        // normal polarity case,   min interval of rising edge = 2  (0 -> 1 1 1 0 0 0 1 0 -> 1)
+        // inverted polarity case, min interval of falling edge = 2 (1 -> 0 0 0 1 1 1 0 1 -> 0)
+        // Sync Code B of head frame also has minimum edge interval, however it will not hit during 2 frames of capture period
+        if (_spdif_rx_check_criteria(sf_id, min_edge_interval, CHK_MIN_EDGE_INTERVAL)) {
+            // Judge polarity (+ frequency): thanks to great idea by IDC-Dragon
             // focusing on Sync Code M which appears in L sub-frame (except for head frame in the block)
             //                                                                      |<--------->|
             // if max interval of rising edge = 6,  then polarity is normal   (0 -> 1 1 1 0 0 0 1 0 -> 1)
             // if max interval of falling edge = 6, then polarity is inverted (1 -> 0 0 0 1 1 1 0 1 -> 0)
-            int max_edge_interval_exp = SYSTEM_CLK_FREQUENCY / samp_freq_array[i] * 6 / 128; // symbol cycle
-            if (max_edge_interval[1] >= max_edge_interval_exp - SC && max_edge_interval[1] <= max_edge_interval_exp + SC) { // normal bit stream
-                *samp_freq = samp_freq_array[i];
+            if (_spdif_rx_check_criteria(sf_id, max_edge_interval[1], CHK_MAX_EDGE_INTERVAL)) { // normal bit stream
+                *samp_freq = sf_info_sets[sf_id].sf;
                 *inverted = false;
                 return 1;
-            } else if (max_edge_interval[0] >= max_edge_interval_exp - SC && max_edge_interval[0] <= max_edge_interval_exp + SC) { // inverted bit stream
-                *samp_freq = samp_freq_array[i];
+            } else if (_spdif_rx_check_criteria(sf_id, max_edge_interval[0], CHK_MAX_EDGE_INTERVAL)) { // inverted bit stream
+                *samp_freq = sf_info_sets[sf_id].sf;
                 *inverted = true;
                 return 1;
             }
@@ -618,9 +697,9 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
         float bitrate_16b = (float) SPDIF_BLOCK_SIZE * 2 * 8 * 1e6 / ave_block_interval;
         samp_freq_actual = bitrate_16b / 32.0;
         spdif_rx_samp_freq_t sf = SAMP_FREQ_NONE;
-        for (int i = 0; i < sizeof(samp_freq_array) / sizeof(spdif_rx_samp_freq_t); i++) {
-            if (samp_freq_actual >= (float) samp_freq_array[i] * (1.0 - SF_CRITERIA) && samp_freq_actual < (float) samp_freq_array[i] * (1.0 + SF_CRITERIA)) {
-                sf = samp_freq_array[i];
+        for (int sf_id = 0; sf_id < _NUM_SAMP_FREQ_IDS_; sf_id++) {
+            if (_spdif_rx_check_criteria(sf_id, (int) (samp_freq_actual + 0.5), CHK_SAMP_FREQ)) {
+                sf = sf_info_sets[sf_id].sf;
                 break;
             }
         }
