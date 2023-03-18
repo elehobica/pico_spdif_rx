@@ -40,11 +40,8 @@ static spdif_rx_config_t gcfg;
 typedef enum _spdif_rx_pio_program_id_t  {
     SPDIF_RX_PIO_CAPTURE = 0,
     SPDIF_RX_PIO_DECODE_48000,
-    SPDIF_RX_PIO_DECODE_48000_INV,
     SPDIF_RX_PIO_DECODE_96000,
-    SPDIF_RX_PIO_DECODE_96000_INV,
     SPDIF_RX_PIO_DECODE_192000,
-    SPDIF_RX_PIO_DECODE_192000_INV
 } spdif_rx_pio_program_id_t;
 
 typedef struct {
@@ -58,11 +55,8 @@ typedef struct {
 static spdif_rx_pio_program_t program_sets[] = {
     {SPDIF_RX_PIO_CAPTURE,           &spdif_rx_capture_program,    0, spdif_rx_capture_offset_entry_point,    spdif_rx_capture_program_get_default_config},
     {SPDIF_RX_PIO_DECODE_48000,      &spdif_rx_48000_program,      0, spdif_rx_48000_offset_entry_point,      spdif_rx_48000_program_get_default_config},
-    {SPDIF_RX_PIO_DECODE_48000_INV,  &spdif_rx_48000_inv_program,  0, spdif_rx_48000_inv_offset_entry_point,  spdif_rx_48000_inv_program_get_default_config},
     {SPDIF_RX_PIO_DECODE_96000,      &spdif_rx_96000_program,      0, spdif_rx_96000_offset_entry_point,      spdif_rx_96000_program_get_default_config},
-    {SPDIF_RX_PIO_DECODE_96000_INV,  &spdif_rx_96000_inv_program,  0, spdif_rx_96000_inv_offset_entry_point,  spdif_rx_96000_inv_program_get_default_config},
-    {SPDIF_RX_PIO_DECODE_192000,     &spdif_rx_192000_program,     0, spdif_rx_192000_offset_entry_point,     spdif_rx_192000_program_get_default_config},
-    {SPDIF_RX_PIO_DECODE_192000_INV, &spdif_rx_192000_inv_program, 0, spdif_rx_192000_inv_offset_entry_point, spdif_rx_192000_inv_program_get_default_config}
+    {SPDIF_RX_PIO_DECODE_192000,     &spdif_rx_192000_program,     0, spdif_rx_192000_offset_entry_point,     spdif_rx_192000_program_get_default_config}
 };
 
 static const spdif_rx_samp_freq_t samp_freq_array[] = {
@@ -129,11 +123,16 @@ static inline uint32_t _millis(void)
 
 // === Internal functions ===
 
-static inline void _spdif_rx_program_init(PIO pio, uint sm, uint offset, uint entry_point, pio_sm_config (*get_default_config)(uint), uint pin)
+static inline void _spdif_rx_program_init(PIO pio, uint sm, uint offset, uint entry_point, pio_sm_config (*get_default_config)(uint), uint pin, bool inverted)
 {
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);
     gpio_pull_down(pin);
+    if (inverted) {
+        gpio_set_inover(pin, GPIO_OVERRIDE_INVERT);
+    } else {
+        gpio_set_inover(pin, GPIO_OVERRIDE_NORMAL);
+    }
 
     pio_sm_config sm_config = get_default_config(offset);
 
@@ -265,7 +264,7 @@ static uint32_t _dma_done_and_restart(uint8_t dma_channel, dma_channel_config* d
     return done_ptr;
 }
 
-static spdif_rx_pio_program_id_t _spdif_rx_get_decode_pio_promgam_id(spdif_rx_samp_freq_t samp_freq, bool inverted)
+static spdif_rx_pio_program_id_t _spdif_rx_get_decode_pio_promgam_id(spdif_rx_samp_freq_t samp_freq)
 {
     spdif_rx_pio_program_id_t pio_program_id;
     switch (samp_freq) {
@@ -284,9 +283,6 @@ static spdif_rx_pio_program_id_t _spdif_rx_get_decode_pio_promgam_id(spdif_rx_sa
         default:
             pio_program_id = SPDIF_RX_PIO_DECODE_48000;
             break;
-    }
-    if (inverted) {
-        pio_program_id++;
     }
     return pio_program_id;
 }
@@ -560,7 +556,7 @@ static void _spdif_rx_decode_start(spdif_rx_samp_freq_t samp_freq, bool inverted
     // === PIO configuration ===
     pio_sm_claim(spdif_rx_pio, gcfg.pio_sm);
     // PIO start
-    spdif_rx_pio_program_id_t pio_program_id = _spdif_rx_get_decode_pio_promgam_id(samp_freq, inverted);
+    spdif_rx_pio_program_id_t pio_program_id = _spdif_rx_get_decode_pio_promgam_id(samp_freq);
     current_pg = &program_sets[pio_program_id];
     current_pg->offset = pio_add_program(spdif_rx_pio, current_pg->program);
     _spdif_rx_program_init(
@@ -569,7 +565,8 @@ static void _spdif_rx_decode_start(spdif_rx_samp_freq_t samp_freq, bool inverted
         current_pg->offset,
         current_pg->entry_point,
         current_pg->get_default_config,
-        gcfg.data_pin
+        gcfg.data_pin,
+        inverted
     );
 }
 
