@@ -80,8 +80,7 @@
 .define cy 20
 .define lp cy/2
 
-; assuming y, osr registers are configured as below
-;   y  : 0x00000000
+; assuming osr register is configured as below
 ;   osr: 0x00000003
 
 public entry_point:
@@ -99,7 +98,7 @@ symbol_1x:
 symbol_11x:
     nop [cy-2]             ;                               :  1 + (lp+1)/cy    2 + lp/cy
     jmp pin sync1110       ; If symbol 111 -> go sync1110  :  2 + lp/cy (*)    2 + (lp+1)/cy (maximum delayed latch point)
-    in y, 1                ; else emit 0 (symbol 110)      :  2 + (lp+1)/cy    2 + (lp+2)/cy
+    in null, 1             ; else emit 0 (symbol 110)      :  2 + (lp+1)/cy    2 + (lp+2)/cy
     jmp symbol_0x [cy-3]   ; go symbol_0x                  :  2 + (lp+2)/cy    3 + lp/cy (= 1 + lp/cy)
 
 wait0pre:
@@ -109,7 +108,7 @@ wait0:
     wait 0 pin 0 [cy-1+lp] ; wait for 1 -> 0               :  0                1 + lp/cy
 symbol_0x:
     jmp pin symbol_01      ; If symbol 01 -> go symbol_01  :  1 + lp/cy (*)    1 + (lp+1)/cy
-    in y, 1                ; else emit 0 (symbol 00)       :  1 + (lp+1)/cy    1 + (lp+2)/cy
+    in null, 1             ; else emit 0 (symbol 00)       :  1 + (lp+1)/cy    1 + (lp+2)/cy
 .wrap
 symbol_01:
     in osr, 1              ; emit 1                        :  1 + (lp+1)/cy    1 + (lp+2)/cy
