@@ -799,11 +799,15 @@ uint32_t spdif_rx_get_parity_err_count()
 
 uint32_t spdif_rx_get_fifo_count()
 {
+    uint32_t save = save_and_disable_interrupts();
+    uint32_t fifo_count;
     if (buff_wr_done_ptr >= buff_rd_ptr) {
-        return buff_wr_done_ptr - buff_rd_ptr;
+        fifo_count = buff_wr_done_ptr - buff_rd_ptr;
     } else {
-        return buff_wr_done_ptr + SPDIF_RX_FIFO_SIZE * 2 - buff_rd_ptr;
+        fifo_count = buff_wr_done_ptr + SPDIF_RX_FIFO_SIZE * 2 - buff_rd_ptr;
     }
+    restore_interrupts(save);
+    return fifo_count;
 }
 
 uint32_t spdif_rx_read_fifo(uint32_t** buff, uint32_t req_count)
