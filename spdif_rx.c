@@ -418,17 +418,23 @@ static void _spdif_rx_common_end()
     dma_channel_abort(gcfg.dma_channel0);
     dma_channel_wait_for_finish_blocking(gcfg.dma_channel0);
     dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel0);
-    dma_channel_unclaim(gcfg.dma_channel0);
+    if (dma_channel_is_claimed(gcfg.dma_channel0)) {
+        dma_channel_unclaim(gcfg.dma_channel0);
+    }
     dma_channel_abort(gcfg.dma_channel1);
     dma_channel_wait_for_finish_blocking(gcfg.dma_channel1);
     dma_irqn_acknowledge_channel(PICO_SPDIF_RX_DMA_IRQ, gcfg.dma_channel1);
-    dma_channel_unclaim(gcfg.dma_channel1);
+    if (dma_channel_is_claimed(gcfg.dma_channel1)) {
+        dma_channel_unclaim(gcfg.dma_channel1);
+    }
     pio_sm_set_enabled(spdif_rx_pio, gcfg.pio_sm, false);
     pio_sm_clear_fifos(spdif_rx_pio, gcfg.pio_sm);
     pio_sm_drain_tx_fifo(spdif_rx_pio, gcfg.pio_sm);
     pio_remove_program(spdif_rx_pio, current_pg->program, current_pg->offset);
     pio_clear_instruction_memory(spdif_rx_pio);
-    pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
+    if (pio_sm_is_claimed(spdif_rx_pio, gcfg.pio_sm)) {
+        pio_sm_unclaim(spdif_rx_pio, gcfg.pio_sm);
+    }
     if (!irq_has_shared_handler(DMA_IRQ_x)) {
         irq_remove_handler(DMA_IRQ_x, spdif_rx_dma_irq_handler);
     }
