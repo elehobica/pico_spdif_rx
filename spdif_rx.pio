@@ -36,35 +36,43 @@
 ; B(L0) + W(R0) + M(L1) + W(R1) + M(L2) + W(R2) + .... + M(L191) + W(R191)
 
 ; === spdif_rx PIO program Specification ===
+; - Overview
 ; PIO frequency: 125 MHz (sys_clk)
 ; example for the case of input sampling frequency: 48.0 KHz
 ; -> symbol clock: 6.144 MHz (128fs) (20.34 cycles of sys_clk -> assume 20 cycles per a symbol)
 ; -> PIO output bit rate: 3.072 Mbps (32bits per a sample)
-; PIO program detects the 'edge' of input bit stream at some points, that enables to achieve no bit loss generated
+; PIO program detects the 'edge' of input bitstream at some points, that enables to achieve no bit loss generated
 ;  regardless of the cycle difference between symbol of input source and that of PIO assuming.
-;  For the same reason, it can absorb similar sampling frequencies as well such as decoding 44.1 KHz by 48.0 KHz program.
-; SPDIF protocol (Sync + BMC) is symetric for the signal polarity, which can be handled by GPIO inverting.
+;  For the same reason, it can absorb near-by sampling frequencies as well, e.g. decoding 44.1 KHz by 48.0 KHz program.
+; SPDIF protocol (Sync + BMC) is symetric for the signal polarity,
+;  therefore the PIO program handles only normal polarity and GPIO inverting takes care of inverted polarity.
+; Thanks to BMC + Parity effect, appearance of Sync polarity is limited to one side under consistent bitstream context,
+;  that allows the PIO program to handle only either polarity of Sync patterns.
 
-; PIO outputs (bit order is opposite to SPDIF format for easy copy of audio data)
+; - PIO output format as [31:0] (bit order is opposite to symbol order of SPDIF format for easy copy of audio data)
 ;
-; 16bit Audio Format
-; PCUV (4) + 16bit Audio (16) + '0000' (4) + AUX (4) + Sync (4)
-; 24bit Audio Format
-; PCUV (4) + 24bit Audio (24) + Sync (4)
+; case of 24bit Audio format
+;   [31:28]  VUCP (bit31: P, bit30: C, bit29: U, bit28: V)
+;   [27: 4]  24bit audio data (signed, MSB is bit 27)
+;   [ 3: 0]  Sync
 ;
-;  0b0  : bit0 (symbol_00 or symbol_11)
-;  0b1  : bit1 (symbol_10 or symbol_01)
-;  0b11 : syncE, sync1 (symbol_1110, symbol_0001) or sync8, sync7 (symbol_1000, symbol_0111)  (can't distinguish)
+; case of 16bit Audio format
+;   [31:28]  VUCP (bit31: P, bit30: C, bit29: U, bit28: V)
+;   [27:12]  16bit audio data (signed, MSB is bit 27)
+;   [11: 8]  '0000'
+;   [ 7: 4]  AUX
+;   [ 3: 0]  Sync
+;   if assuming AUX is always 0b0000, then 16bit audio data can be treated as 24bit audio data as [27:4]
 ;
-;  thus Sync Code will consist of as follows
+; Sync code consists of below (at [3:0])
 ;   0b1111 : Sync Code B (sync E8 or sync 17) (syncE -> sync8  or  sync1 -> sync7)
 ;   0b1011 : Sync Code M (sync E2 or sync 1D) (syncE -> bit0 -> bit1  or  sync1 -> bit0 -> bit1)
 ;   0b0111 : Sync Code W (sync E4 or sync 1B) (syncE -> bit1 -> bit0  or  sync1 -> bit1 -> bit0)
+;   In precision, only syncE and sync8 (sync1 and sync7) are corresponding to 0b11 and other sync codes follow data bit assignment
 ;
-;  audio data can be extracted as follows
-;   16bit audio data: from 5th bit to 21st bit in MSB to LSB order (signed)
-;   24bit audio data: from 5th bit to 29th bit in MSB to LSB order (signed)
-;  if assuming AUX shows always 0b0000, then 16bit audio data can be treated as 24bit data
+; Each bit of data part (at [31:4])
+;   0b0  : bit0 (symbol_00 or symbol_11)
+;   0b1  : bit1 (symbol_10 or symbol_01)
 
 ; ==============================================================================================
 .program spdif_rx_48000
