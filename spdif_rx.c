@@ -85,12 +85,13 @@ typedef struct _spdif_rx_samp_freq_info_set_t {
         SAMP_FREQ_##sf, \
         SAMP_FREQ_##sf *  99 / 100, \
         SAMP_FREQ_##sf * 101 / 100, \
-        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 2 / 128) *  97 / 100, \
-        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 2 / 128) * 103 / 100, \
+        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 2 / 128) *  91 / 100, \
+        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 2 / 128) * 111 / 100, \
         (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 6 / 128) *  97 / 100, \
-        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 6 / 128) * 103 / 100 \
+        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 6 / 128) * 104 / 100 \
     }
-// +- 3% is the range which doesn't overlap between near-by frequencies in symbol cycle length
+// -9%, +11% is the minimum range which makes at least +- 1 cycles at 192000 Hz in 2 symbol length
+// -3%, +4% is the maximum range which doesn't overlap between near-by frequencies in 6 symbol length
 
 static const spdif_rx_samp_freq_info_set_t sf_info_sets[] = {
     GEN_SF_INFO_SET(44100),
