@@ -103,6 +103,7 @@ void i2s_callback_loop()
 #ifndef NDEBUG
     printf("i2s_callback_loop started (on core %d)\n", get_core_num());
 #endif // NDEBUG
+    multicore_fifo_drain();
     while (true) {
         uint32_t msg = multicore_fifo_pop_blocking();
         if (msg == EVENT_I2S_DMA_TRANSFER_STARTED) {
