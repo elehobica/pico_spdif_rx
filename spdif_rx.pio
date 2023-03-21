@@ -109,9 +109,6 @@ symbol_11x:
     in null, 1             ; else emit 0 (symbol 110)      :  2 + (lp+1)/cy    2 + (lp+2)/cy
     jmp symbol_0x [cy-3]   ; go symbol_0x                  :  2 + (lp+2)/cy    3 + lp/cy (= 1 + lp/cy)
 
-wait0pre:
-    wait 1 pin 0
-
 wait0:
     wait 0 pin 0 [cy-1+lp] ; wait for 1 -> 0               :  0                1 + lp/cy
 symbol_0x:
