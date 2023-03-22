@@ -24,9 +24,10 @@
 ;  Audio data appears from LSB earlier to MSB later
 ;
 ; VUCP
-;  P: parity should be checked every sub frame (checking 27bits excluded sync and P out of 32 bits )
-;  C: using heading 32 frames' value as bit 0 to 31 out of 192 frames (C value of 2 sub frames should be the same)
+;  P: parity should be checked every sub frame (checking 27bits excluding sync and P out of 32 bits )
+;  C: for standard case, heading 32 frames' value as bit 0 to 31 out of 192 frames (C value of 2 sub frames should be the same)
 ;   further detail for C bits, see https://www.minidisc.org/spdif_c_channel.html
+;   for extended case, it can be up to 192 bits when 192 frames fully utilized
 ;
 ; [SPDIF Frame Format] (2 Sub Frames)
 ; B(L) + W(R) : head block
@@ -76,9 +77,9 @@
 
 ; ==============================================================================================
 .program spdif_rx_48000
-; it's desirable symbol cycle should meet with sampling frequency of input source
-;  at least between 2+1 cycles, then it should keep good latching position of the symbol.
-;  (because 'wait' intruction can cancel the accumulated timing error)
+; It's desirable that 'cy' (cycles per symbol) should be adjusted to the symbol period of target sampling frequency
+;  as close as it can keep good latching position during 2+1 symbol periods.
+;  ('wait' intruction can cancel the accumulated timing error for longer symbol periods)
 ;
 ; cy: 20 clocks for a symbol cycle for both 44.1 KHz and 48 KHz (for reference, cy = 22.14 for 44.1 KHz, cy = 20.34 for 48 KHz)
 ; cy: 10 clocks for a symbol cycle for both 88.2 KHz and 96 KHz (for reference, cy = 11.07 for 88.2 KHz, cy = 10.17 for 96 KHz)
