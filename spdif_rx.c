@@ -9,8 +9,8 @@
 
 #include "spdif_rx.h"
 
-#include <stdio.h>
 #include <string.h>
+#include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/dma.h"
 #include "hardware/irq.h"
@@ -834,14 +834,4 @@ uint32_t spdif_rx_read_fifo(uint32_t** buff, uint32_t req_count)
     }
     restore_interrupts(save);
     return get_count;
-}
-
-uint32_t* spdif_rx_read_fifo_single()
-{
-    uint32_t save = save_and_disable_interrupts();
-    uint32_t* buff = _to_buff_ptr(buff_rd_ptr);
-    buff_rd_ptr = _ptr_inc(buff_rd_ptr, 1);
-    //printf("ptr = %d, buff_ptr = %d\n", buff_rd_ptr, (int) buff);
-    restore_interrupts(save);
-    return buff;
 }
