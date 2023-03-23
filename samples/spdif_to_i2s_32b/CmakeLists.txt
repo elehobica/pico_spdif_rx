@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 include($ENV{PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 
@@ -25,5 +27,10 @@ target_link_libraries(${PROJECT_NAME}
     my_pico_audio
     my_pico_audio_i2s
 )
+
+add_compile_definitions(PICO_SPDIF_RX_PIO=0)
+add_compile_definitions(PICO_SPDIF_RX_DMA_IRQ=0)
+add_compile_definitions(PICO_AUDIO_I2S_PIO=1)
+add_compile_definitions(PICO_AUDIO_I2S_DMA_IRQ=1)
 
 pico_add_extra_outputs(${PROJECT_NAME}) # create map/bin/hex/uf2 files

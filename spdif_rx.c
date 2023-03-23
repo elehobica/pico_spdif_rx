@@ -4,9 +4,6 @@
 / refer to https://opensource.org/licenses/BSD-2-Clause
 /------------------------------------------------------*/
 
-#define PICO_SPDIF_RX_PIO 1
-#define PICO_SPDIF_RX_DMA_IRQ 1
-
 #include "spdif_rx.h"
 
 #include <string.h>
