@@ -223,9 +223,10 @@ static int _check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
 {
     uint pos_syncB = 0;
     uint32_t block_parity_err_count = 0;
-    uint8_t c_bits_raw[SPDIF_BLOCK_SIZE / 16];
-    uint8_t c_bit_pos = 0x1; // start with LSB
-    uint8_t c_bits_byte = 0;
+    uint32_t c_bits_raw[SPDIF_BLOCK_SIZE / 16 / 4];
+    uint32_t* c_bits_run = c_bits_raw; // running pointer into above
+    uint32_t c_bit_pos = 0x1; // start with LSB
+    uint32_t c_bits_dword = 0;
 
     for (int i = 0; i < SPDIF_BLOCK_SIZE; i++) {
         uint32_t sync = buff[i] & 0xf;
@@ -245,14 +246,13 @@ static int _check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
             // C bits (whole 192 bits)
             if (i % 2 == 0) { // using even sub frame of each block
                 if (buff[i] & (0x1 << 30)) {
-                    c_bits_byte |= c_bit_pos;
+                    c_bits_dword |= c_bit_pos;
                 }
-                if (c_bit_pos >> 7) { // top boundary bit of each byte
-                    c_bits_raw[i / 16] = c_bits_byte;
-                    c_bits_byte = 0;
+                c_bit_pos <<= 1;
+                if (c_bit_pos == 0) { // top boundary bit of each dword
                     c_bit_pos = 0x1; // restart with LSB
-                } else {
-                    c_bit_pos <<= 1;
+                    *c_bits_run++ = c_bits_dword;
+                    c_bits_dword = 0;
                 }
             }
 
