@@ -256,14 +256,13 @@ static int _check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
                 }
             }
 
-            // Parity (27 bits of every sub frame)
-            uint32_t v = buff[i] & 0x7FFFFFF0; // excluding P and sync
+            // Parity (27 bits of every sub frame, plus parity itself)
+            uint32_t v = buff[i] & 0xFFFFFFF0; // excluding sync, but including P
             // bithack by Compute parity of word with a multiply, faster than __builtin_parity()
             v ^= v >> 1;
             v ^= v >> 2;
             v = (v & 0x11111111) * 0x11111111;
-            v = (v << (31-28)); // parity is now in bit 28, move to bit 31
-            if ((v ^ buff[i]) & (1<<31)) {
+            if (v & (1<<28)) { // parity is now in bit 28
                 block_parity_err_count++;
             }
         }
