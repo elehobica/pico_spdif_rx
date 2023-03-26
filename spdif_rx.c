@@ -6,6 +6,7 @@
 
 #include "spdif_rx.h"
 
+#include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
@@ -238,33 +239,36 @@ static int _check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
                 block_aligned = false;
                 break;
             }
-            if (!gcfg.full_check) {
+            if (gcfg.flags == SPDIF_RX_FLAGS_NONE) {
                 return true;
             }
             // VUCP handling
-            // C bits (whole 192 bits)
-            if (i % 2 == 0) { // using even sub frame of each block
-                if (buff[i] & (0x1 << 30)) {
-                    c_bits_byte |= c_bit_pos;
-                }
-                if (c_bit_pos >> 7) { // top boundary bit of each byte
-                    c_bits_raw[i / 16] = c_bits_byte;
-                    c_bits_byte = 0;
-                    c_bit_pos = 0x1; // restart with LSB
-                } else {
-                    c_bit_pos <<= 1;
+            if (gcfg.flags & SPDIF_RX_FLAG_C_BITS) {
+                // C bits (whole 192 bits)
+                if (i % 2 == 0) { // using even sub frame of each block
+                    if (buff[i] & (0x1 << 30)) {
+                        c_bits_byte |= c_bit_pos;
+                    }
+                    if (c_bit_pos >> 7) { // top boundary bit of each byte
+                        c_bits_raw[i / 16] = c_bits_byte;
+                        c_bits_byte = 0;
+                        c_bit_pos = 0x1; // restart with LSB
+                    } else {
+                        c_bit_pos <<= 1;
+                    }
                 }
             }
-
-            // Parity (27 bits of every sub frame)
-            uint32_t v = buff[i] & 0x7FFFFFF0; // excluding P and sync
-            // bithack by Compute parity of word with a multiply, faster than __builtin_parity()
-            v ^= v >> 1;
-            v ^= v >> 2;
-            v = (v & 0x11111111) * 0x11111111;
-            v = (v << (31-28)); // parity is now in bit 28, move to bit 31
-            if ((v ^ buff[i]) & (1<<31)) {
-                block_parity_err_count++;
+            if (gcfg.flags & SPDIF_RX_FLAG_CHECK_PARITY) {
+                // Parity (27 bits of every sub frame)
+                uint32_t v = buff[i] & 0x7FFFFFF0; // excluding P and sync
+                // bithack by Compute parity of word with a multiply, faster than __builtin_parity()
+                v ^= v >> 1;
+                v ^= v >> 2;
+                v = (v & 0x11111111) * 0x11111111;
+                v = (v << (31-28)); // parity is now in bit 28, move to bit 31
+                if ((v ^ buff[i]) & (1<<31)) {
+                    block_parity_err_count++;
+                }
             }
         }
     }
@@ -274,7 +278,9 @@ static int _check_block(uint32_t buff[SPDIF_BLOCK_SIZE])
         memcpy(c_bits, c_bits_raw, sizeof(c_bits)); // copy what's been collected
         trans_count = SPDIF_BLOCK_SIZE;
         if (spdif_rx_get_samp_freq() != SAMP_FREQ_NONE) {
-            spdif_rx_callback_func(buff, trans_count, c_bits, block_parity_err_count > 0);
+            if (gcfg.flags & SPDIF_RX_FLAG_CALLBACKS) {
+                spdif_rx_callback_func(buff, trans_count, c_bits, block_parity_err_count > 0);
+            }
         }
     } else {
         if (pos_syncB != 0 && block_align_count == 0) {
@@ -567,7 +573,7 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inve
 static void _spdif_rx_decode_timeout(uint alarm_num)
 {
     state = SPDIF_RX_STATE_NO_SIGNAL;
-    if (on_lost_stable_func != NULL) {
+    if ((gcfg.flags & SPDIF_RX_FLAG_CALLBACKS) && on_lost_stable_func != NULL) {
         on_lost_stable_func();
     }
     _clear_timer();
@@ -728,7 +734,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
     // state transition in decode operation case
     if (state == SPDIF_RX_STATE_STABLE) {
         if (!stable_done) {
-            if (on_stable_func != NULL) {
+            if ((gcfg.flags & SPDIF_RX_FLAG_CALLBACKS) && on_stable_func != NULL) {
                 on_stable_func(samp_freq);
             }
         }

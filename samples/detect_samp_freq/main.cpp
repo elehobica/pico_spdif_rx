@@ -67,7 +67,7 @@ int main()
         .dma_channel0 = 0,
         .dma_channel1 = 1,
         .alarm = 0,
-        .full_check = true
+        .flags = SPDIF_RX_FLAGS_ALL
     };
 
     spdif_rx_start(&config);

@@ -35,15 +35,6 @@ static audio_buffer_format_t producer_format = {
     .sample_stride = 8
 };
 
-static spdif_rx_config_t spdif_rx_config = {
-    .data_pin = PIN_PICO_SPDIF_RX_DATA,
-    .pio_sm = 0,
-    .dma_channel0 = 2,
-    .dma_channel1 = 3,
-    .alarm = 0,
-    .full_check = true
-};
-
 static audio_i2s_config_t i2s_config = {
     .data_pin = PICO_AUDIO_I2S_DATA_PIN,
     .clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE,
@@ -298,7 +289,16 @@ int main()
     gpio_set_dir(PIN_DCDC_PSM_CTRL, GPIO_OUT);
     gpio_put(PIN_DCDC_PSM_CTRL, 1); // PWM mode for less Audio noise
 
-    spdif_rx_start(&spdif_rx_config);
+    spdif_rx_config_t config = {
+        .data_pin = PIN_PICO_SPDIF_RX_DATA,
+        .pio_sm = 0,
+        .dma_channel0 = 2,
+        .dma_channel1 = 3,
+        .alarm = 0,
+        .flags = SPDIF_RX_FLAGS_ALL
+    };
+
+    spdif_rx_start(&config);
     spdif_rx_set_callback_on_stable(on_stable_func);
     spdif_rx_set_callback_on_lost_stable(on_lost_stable_func);
 

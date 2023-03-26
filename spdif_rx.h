@@ -34,6 +34,12 @@ extern "C" {
 #error PICO_SPDIF_RX_PIO ust be 0 or 1
 #endif
 
+#define SPDIF_RX_FLAGS_NONE         (0)
+#define SPDIF_RX_FLAG_CHECK_PARITY  (1<<0)
+#define SPDIF_RX_FLAG_C_BITS        (1<<1)
+#define SPDIF_RX_FLAG_CALLBACKS     (1<<2)
+#define SPDIF_RX_FLAGS_ALL          (SPDIF_RX_FLAG_CHECK_PARITY | SPDIF_RX_FLAG_C_BITS | SPDIF_RX_FLAG_CALLBACKS)
+
 /** spdif_rx_config_t */
 typedef struct _spdif_rx_config_t {
     uint8_t data_pin;    /**< data pin for SPDIF Rx */
@@ -41,7 +47,7 @@ typedef struct _spdif_rx_config_t {
     uint dma_channel0;   /**< dma 0 resource id */
     uint dma_channel1;   /**< dma 1 resource id */
     uint alarm;          /**< alarm resource id */
-    bool full_check;     /**< if false, no C_bits info, no parity check, but light weight processing */
+    uint8_t flags;       /**< flags for functions: set SPDIF_RX_FLAGS_ALL or SPDIF_RX_FLAGS_NONE, otherwise set combination of SPDIF_RX_FLAG_xxx */
 } spdif_rx_config_t;
 
 /** spdif_rx_samp_freq_t  */
