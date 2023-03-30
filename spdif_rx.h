@@ -31,7 +31,7 @@ extern "C" {
 #endif
 
 #if !(PICO_SPDIF_RX_PIO == 0 || PICO_SPDIF_RX_PIO == 1)
-#error PICO_SPDIF_RX_PIO ust be 0 or 1
+#error PICO_SPDIF_RX_PIO must be 0 or 1
 #endif
 
 #define SPDIF_RX_FLAGS_NONE         (0)

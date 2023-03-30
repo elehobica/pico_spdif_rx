@@ -34,7 +34,6 @@ if (NOT TARGET spdif_rx)
         hardware_dma
         hardware_pio
         hardware_irq
-        my_pico_audio
-        spdif_rx
+        pico_audio_32b
     )
 endif()
