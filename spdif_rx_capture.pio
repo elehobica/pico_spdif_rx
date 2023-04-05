@@ -36,7 +36,7 @@ static inline void spdif_rx_capture_program_init(PIO pio, uint sm, uint offset, 
     gpio_pull_down(pin);
     gpio_set_inover(pin, GPIO_OVERRIDE_NORMAL);
 
-    pio_sm_config sm_config = get_default_config(offset);
+    pio_sm_config sm_config = (*get_default_config)(offset);
 
     sm_config_set_clkdiv(&sm_config, 1);
     sm_config_set_jmp_pin(&sm_config, pin);

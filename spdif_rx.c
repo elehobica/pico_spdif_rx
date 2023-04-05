@@ -181,7 +181,7 @@ static inline void _spdif_rx_program_init(PIO pio, uint sm, uint offset, uint en
         gpio_set_inover(pin, GPIO_OVERRIDE_NORMAL);
     }
 
-    pio_sm_config sm_config = get_default_config(offset);
+    pio_sm_config sm_config = (*get_default_config)(offset);
 
     sm_config_set_jmp_pin(&sm_config, pin);
     sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
@@ -573,7 +573,7 @@ static void _spdif_rx_decode_timeout(uint alarm_num)
 {
     state = SPDIF_RX_STATE_NO_SIGNAL;
     if ((gcfg.flags & SPDIF_RX_FLAG_CALLBACKS) && on_lost_stable_func != NULL) {
-        on_lost_stable_func();
+        (*on_lost_stable_func)();
     }
     _clear_timer();
     _spdif_rx_common_end();
@@ -734,7 +734,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
     if (state == SPDIF_RX_STATE_STABLE) {
         if (!stable_done) {
             if ((gcfg.flags & SPDIF_RX_FLAG_CALLBACKS) && on_stable_func != NULL) {
-                on_stable_func(samp_freq);
+                (*on_stable_func)(samp_freq);
             }
         }
         stable_done = true;
