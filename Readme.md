@@ -10,13 +10,18 @@
 * Raspberry Pi Pico (rp2040)
 * SPDIF Coaxial or TOSLINK Rx module (DLR1160 or equivalent)
 
-## Pin Assignment
+## Pin Assignment & Connection
 ### SPDIF Rx
 | Pico Pin # | GPIO | Function | Connection |
 ----|----|----|----
 | 20 | GP15 | DATA | from SPDIF data |
 
 ![SPDIF_Rx_Schematic](doc/SPDIF_Rx_Schematic.png)
+
+Notes:
+
+* 74HC04 should be genuine device, otherwise (counterfeit device) it could not work at higher sampling frequencies.
+* if TOSLINK only, direct connection from module output to GP15 will work as well.
 
 ## How to build
 * See ["Getting started with Raspberry Pi Pico"](https://datasheets.raspberrypi.org/pico/getting-started-with-pico.pdf)
