@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-add_subdirectory(../.. spdif_rx)
+add_subdirectory(../.. pico_spdif_rx)
 add_subdirectory(../lib/pico_audio_32b pico_audio_32b) # for extended audio.h
 
 # select sample application here (choose only one)
@@ -22,7 +22,7 @@ add_executable(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME}
     pico_stdlib
-    spdif_rx
+    pico_spdif_rx
 )
 
 pico_add_extra_outputs(${PROJECT_NAME}) # create map/bin/hex/uf2 files

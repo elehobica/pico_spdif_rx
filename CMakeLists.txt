@@ -1,10 +1,10 @@
-if (NOT TARGET spdif_rx)
-    add_library(spdif_rx INTERFACE)
+if (NOT TARGET pico_spdif_rx)
+    add_library(pico_spdif_rx INTERFACE)
 
-    pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_48000.pio)
-    pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_96000.pio)
-    pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_192000.pio)
-    pico_generate_pio_header(spdif_rx ${CMAKE_CURRENT_LIST_DIR}/spdif_rx_capture.pio)
+    pico_generate_pio_header(pico_spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_48000.pio)
+    pico_generate_pio_header(pico_spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_96000.pio)
+    pico_generate_pio_header(pico_spdif_rx ${CMAKE_CURRENT_BINARY_DIR}/spdif_rx_192000.pio)
+    pico_generate_pio_header(pico_spdif_rx ${CMAKE_CURRENT_LIST_DIR}/spdif_rx_capture.pio)
 
     add_custom_command(
         OUTPUT
@@ -21,15 +21,15 @@ if (NOT TARGET spdif_rx)
             192000
     )
 
-    target_sources(spdif_rx INTERFACE
+    target_sources(pico_spdif_rx INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}/spdif_rx.c
     )
 
-    target_include_directories(spdif_rx INTERFACE
+    target_include_directories(pico_spdif_rx INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}
     )
 
-    target_link_libraries(spdif_rx INTERFACE
+    target_link_libraries(pico_spdif_rx INTERFACE
         pico_stdlib
         hardware_dma
         hardware_pio

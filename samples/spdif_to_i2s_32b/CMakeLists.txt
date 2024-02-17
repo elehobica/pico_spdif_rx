@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-add_subdirectory(../.. spdif_rx)
+add_subdirectory(../.. pico_spdif_rx)
 add_subdirectory(../lib/pico_audio_32b pico_audio_32b) # for extended audio.h
 add_subdirectory(../lib/pico_audio_i2s_32b pico_audio_i2s_32b)
 
@@ -23,7 +23,7 @@ add_executable(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME}
     pico_stdlib
-    spdif_rx
+    pico_spdif_rx
     pico_audio_32b
     pico_audio_i2s_32b
 )
