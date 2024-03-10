@@ -25,4 +25,9 @@ target_link_libraries(${PROJECT_NAME}
     pico_spdif_rx
 )
 
+# set core1 process i2s_callback
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    CORE1_PROCESS_I2S_CALLBACK
+)
+
 pico_add_extra_outputs(${PROJECT_NAME}) # create map/bin/hex/uf2 files
