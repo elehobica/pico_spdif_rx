@@ -7,6 +7,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "pico/time.h"
 #include "pico/types.h"
 
 #ifdef __cplusplus
@@ -42,12 +43,12 @@ extern "C" {
 
 /** spdif_rx_config_t */
 typedef struct _spdif_rx_config_t {
-    uint8_t data_pin;    /**< data pin for SPDIF Rx */
-    uint pio_sm;         /**< PIO state mechine resource id */
-    uint dma_channel0;   /**< dma 0 resource id */
-    uint dma_channel1;   /**< dma 1 resource id */
-    uint alarm;          /**< alarm resource id */
-    uint8_t flags;       /**< flags for functions: set SPDIF_RX_FLAGS_ALL or SPDIF_RX_FLAGS_NONE, otherwise set combination of SPDIF_RX_FLAG_xxx */
+    uint8_t data_pin;           /**< data pin for SPDIF Rx */
+    uint pio_sm;                /**< PIO state mechine resource id */
+    uint dma_channel0;          /**< dma 0 resource id */
+    uint dma_channel1;          /**< dma 1 resource id */
+    alarm_pool_t* alarm_pool;   /**< alarm pool pointer */
+    uint8_t flags;              /**< flags for functions: set SPDIF_RX_FLAGS_ALL or SPDIF_RX_FLAGS_NONE, otherwise set combination of SPDIF_RX_FLAG_xxx */
 } spdif_rx_config_t;
 
 /** spdif_rx_samp_freq_t  */

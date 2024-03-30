@@ -8,11 +8,11 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include "hardware/sync.h"
+#include "pico/stdlib.h"
 #include "pico/audio.h"
 #include "spdif_rx_capture.pio.h"
 #include "spdif_rx_48000.pio.h"
@@ -33,6 +33,7 @@
 #define NUM_STABLE_FREQ (16) // 1 ~ 31
 
 static spdif_rx_config_t gcfg;
+static alarm_id_t alarm_id;
 
 typedef enum _spdif_rx_pio_program_id_t  {
     SPDIF_RX_PIO_CAPTURE = 0,
@@ -155,7 +156,7 @@ static uint8_t c_bits[SPDIF_BLOCK_SIZE / 16];
 static uint32_t parity_err_count;
 
 // prototype declaration
-static void _spdif_rx_capture_retry(uint alarm_num);
+static int64_t _spdif_rx_capture_retry(alarm_id_t /*id*/, void* /*user_data*/);
 void __isr __time_critical_func(spdif_rx_dma_irq_handler)();
 
 static inline uint64_t _micros(void)
@@ -346,26 +347,19 @@ static spdif_rx_pio_program_id_t _spdif_rx_get_decode_pio_promgam_id(spdif_rx_sa
 
 static inline void _clear_timer()
 {
-    if (hardware_alarm_is_claimed(gcfg.alarm)) {
-        hardware_alarm_cancel(gcfg.alarm);
-        hardware_alarm_unclaim(gcfg.alarm);
-    }
+    alarm_pool_cancel_alarm(gcfg.alarm_pool, alarm_id);
 }
 
-static inline void _set_timer_after_by_us(hardware_alarm_callback_t callback, uint32_t after_us)
+static inline void _set_timer_after_by_us(alarm_callback_t callback, uint32_t after_us)
 {
     _clear_timer();
-    hardware_alarm_claim(gcfg.alarm);
-    hardware_alarm_set_callback(gcfg.alarm, callback);
-    hardware_alarm_set_target(gcfg.alarm, delayed_by_us(get_absolute_time(), (uint64_t) after_us));
+    alarm_id = alarm_pool_add_alarm_in_us(gcfg.alarm_pool, (uint64_t) after_us, callback, NULL, false);
 }
 
-static inline void _set_timer_after_by_ms(hardware_alarm_callback_t callback, uint32_t after_ms)
+static inline void _set_timer_after_by_ms(alarm_callback_t callback, uint32_t after_ms)
 {
     _clear_timer();
-    hardware_alarm_claim(gcfg.alarm);
-    hardware_alarm_set_callback(gcfg.alarm, callback);
-    hardware_alarm_set_target(gcfg.alarm, delayed_by_ms(get_absolute_time(), after_ms));
+    alarm_id = alarm_pool_add_alarm_in_ms(gcfg.alarm_pool, after_ms, callback, NULL, false);
 }
 
 static void _spdif_rx_capture_start()
@@ -441,14 +435,14 @@ static void _spdif_rx_common_end()
     }
 }
 
-static void _spdif_rx_capture_timeout(uint alarm_num)
+static int64_t _spdif_rx_capture_timeout(alarm_id_t id, void* user_data)
 {
     _clear_timer();
     _spdif_rx_common_end();
     _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
 }
 
-static void _spdif_rx_capture_retry(uint alarm_num)
+static int64_t _spdif_rx_capture_retry(alarm_id_t id, void* user_data)
 {
     _clear_timer();
     _spdif_rx_capture_start();
@@ -568,7 +562,7 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inve
     return 0;
 }
 
-static void _spdif_rx_decode_timeout(uint alarm_num)
+static int64_t _spdif_rx_decode_timeout(alarm_id_t id, void* user_data)
 {
     state = SPDIF_RX_STATE_NO_SIGNAL;
     if ((gcfg.flags & SPDIF_RX_FLAG_CALLBACKS) && on_lost_stable_func != NULL) {
@@ -741,7 +735,7 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
     } else if (state == SPDIF_RX_STATE_WAITING_STABLE && now_ms < waiting_start_time_ms + decode_wait_stable_ms) {
         _set_timer_after_by_ms(_spdif_rx_decode_timeout, decode_timeout_ms);
     } else {
-        _spdif_rx_decode_timeout(gcfg.alarm); // call decode timeout target directly
+        _spdif_rx_decode_timeout(-1, NULL); // call decode timeout target directly
     }
     prev_time_us = now_us;
 }
@@ -752,7 +746,7 @@ void spdif_rx_start(const spdif_rx_config_t* config)
 {
     state = SPDIF_RX_STATE_NO_SIGNAL;
     memmove(&gcfg, config, sizeof(spdif_rx_config_t)); // copy to gcfg
-    _spdif_rx_capture_retry(gcfg.alarm); // at first, call capture retry timeout target directly
+    _spdif_rx_capture_retry(-1, NULL); // at first, call capture retry timeout target directly
 }
 
 void spdif_rx_end()

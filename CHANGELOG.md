@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * Support pico-sdk 1.5.1 (previously 1.4.0)
 * Change library name to pico_spdif_rx (previously spdif_rx)
 * Replace PICO_SPDIF_RX_PIO, PICO_SPDIF_RX_DMA_IRQ macro with add_compile_definitions() in CmakeLists.txt
+* Use alarm pool in stead of immediate hardware alarm number
 
 ### Fixed
 * Fix CMakeLlists.txt filename (PR by DaveVdE)

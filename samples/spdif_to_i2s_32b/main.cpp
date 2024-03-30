@@ -294,7 +294,7 @@ int main()
         .pio_sm = 0,
         .dma_channel0 = 2,
         .dma_channel1 = 3,
-        .alarm = 0,
+        .alarm_pool = alarm_pool_get_default(),
         .flags = SPDIF_RX_FLAGS_ALL
     };
 
