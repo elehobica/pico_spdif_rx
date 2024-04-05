@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+
+## [v0.9.2] - 2023-04-05
 ### Changed
 * Support pico-sdk 1.5.1 (previously 1.4.0)
 * Change library name to pico_spdif_rx (previously spdif_rx)
