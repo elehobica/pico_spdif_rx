@@ -120,7 +120,7 @@ static const uint32_t SYNC_W = 0b0111;
 
 // timer parameters
 static const uint32_t capture_retry_interval_ms = 100;
-static const uint32_t capture_timeout_us        = 100; // us
+static const uint32_t capture_timeout_us        = 100 + 300; // us (300 us to give more time margin before cancelling timeout from spdif_rx_dma_irq_handler by _clear_timer() since sdk-2.0.0 corresponding to alarm_pool usage)
 static const uint32_t decode_wait_stable_ms     = 200;
 static const uint32_t decode_timeout_ms         = 10;
 
