@@ -120,7 +120,7 @@ static const uint32_t SYNC_W = 0b0111;
 
 // timer parameters
 static const uint32_t capture_retry_interval_ms = 100;
-static const uint32_t capture_timeout_us        = 100; // us
+static const uint32_t capture_timeout_us        = 100 + 300; // us (300 us to give more time margin before cancelling timeout from spdif_rx_dma_irq_handler by _clear_timer() since sdk-2.0.0 corresponding to alarm_pool usage)
 static const uint32_t decode_wait_stable_ms     = 200;
 static const uint32_t decode_timeout_ms         = 10;
 
@@ -440,6 +440,7 @@ static int64_t _spdif_rx_capture_timeout(alarm_id_t id, void* user_data)
     _clear_timer();
     _spdif_rx_common_end();
     _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
+    return 0;
 }
 
 static int64_t _spdif_rx_capture_retry(alarm_id_t id, void* user_data)
@@ -447,6 +448,7 @@ static int64_t _spdif_rx_capture_retry(alarm_id_t id, void* user_data)
     _clear_timer();
     _spdif_rx_capture_start();
     _set_timer_after_by_us(_spdif_rx_capture_timeout, capture_timeout_us);
+    return 0;
 }
 
 static bool _spdif_rx_check_criteria(int samp_freq_id, int value, spdif_rx_samp_freq_criteria_check_t check_type)
@@ -571,6 +573,7 @@ static int64_t _spdif_rx_decode_timeout(alarm_id_t id, void* user_data)
     _clear_timer();
     _spdif_rx_common_end();
     _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
+    return 0;
 }
 
 static void _spdif_rx_decode_start(spdif_rx_samp_freq_t samp_freq, bool inverted)

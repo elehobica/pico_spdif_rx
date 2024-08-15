@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## [Unreleased]
 ### Changed
 * Get python3 path by FindPython3 for multi platforms
+* Support pico-sdk 2.0.0
 
 ## [v0.9.2] - 2023-04-05
 ### Changed
