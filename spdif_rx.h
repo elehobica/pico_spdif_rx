@@ -74,14 +74,14 @@ typedef enum _spdif_rx_state_t  {
 #define SPDIF_RX_FIFO_SIZE (NUM_BLOCKS * SPDIF_BLOCK_SIZE)
 
 /**
-* start SPDIF
+* start S/PDIF receiver
 *
 * @param[in] config configulation by spdif_rx_config_t
 */
 void spdif_rx_start(const spdif_rx_config_t* config);
 
 /**
-* end SPDIF
+* end S/PDIF receiver
 */
 void spdif_rx_end();
 

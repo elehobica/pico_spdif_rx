@@ -1,11 +1,11 @@
-# Raspberry Pi Pico spdif_rx
+# Raspberry Pi Pico S/PDIF receiver library
 
 ## spdif_to_i2s_32b Project
-* convert SPDIF input to I2S 32bit
+* convert S/PDIF input to I2S 32bit
 
 ## Supported Board and Peripheral Devices
 * Raspberry Pi Pico (rp2040)
-* SPDIF Coaxial or TOSLINK (RX178A or equivalent) receiver
+* S/PDIF Coaxial or TOSLINK (RX178A or equivalent) receiver
 * PCM5102 (spdif_to_i2s_32 project only)
 
 ## Pin Assignment

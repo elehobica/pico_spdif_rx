@@ -1,20 +1,20 @@
-# Raspberry Pi Pico spdif_rx
+# Raspberry Pi Pico S/PDIF receiver library
 
 ## Overview
-* SPDIF receiver by rp2040 PIO function
+* S/PDIF receiver by rp2040 PIO function
 * format: 2ch, 16bit or 24bit
 * sampling frequency: 44.1 KHz, 48.0 KHz, 88.2 KHz, 96.0 KHz, 176.4 KHz, 192.0 KHz
 * signal detecting function for all supported sampling frequencies
 
 ## Supported Board and Peripheral Devices
 * Raspberry Pi Pico (rp2040)
-* SPDIF Coaxial or TOSLINK Rx module (DLR1160 or equivalent)
+* S/PDIF Coaxial or TOSLINK Rx module (DLR1160 or equivalent)
 
 ## Pin Assignment & Connection
-### SPDIF Rx
+### S/PDIF Rx
 | Pico Pin # | GPIO | Function | Connection |
 ----|----|----|----
-| 20 | GP15 | DATA | from SPDIF data |
+| 20 | GP15 | DATA | from S/PDIF data |
 
 ![SPDIF_Rx_Schematic](doc/SPDIF_Rx_Schematic.png)
 
@@ -62,12 +62,12 @@ $ make -j4
 * Download "xxxxx.uf2" on RPI-RP2 drive
 
 ## Decode output format
-* 32bit output for each SPDIF sub frame including header, audio data, AUX, VUCP
+* 32bit output for each S/PDIF sub frame including header, audio data, AUX, VUCP
 * see comments in [spdif_rx.pio](spdif_rx.pio) for further detail
 
 ## Sample projects
 ### detect_samp_freq
-* display sampling frequency, C bits of SPDIF frame and number of parity errors while decoding
+* display sampling frequency, C bits of S/PDIF frame and number of parity errors while decoding
 
 ### spdif_to_i2s_32b
-* convert SPDIF input to I2S 32bit output
+* convert S/PDIF input to I2S 32bit output
