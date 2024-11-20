@@ -13,7 +13,6 @@
 #include "hardware/irq.h"
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
-#include "pico/audio.h"
 #include "spdif_rx_capture.pio.h"
 #include "spdif_rx_48000.pio.h"
 #include "spdif_rx_96000.pio.h"
@@ -133,7 +132,6 @@ static uint32_t fifo_buff[SPDIF_RX_FIFO_SIZE];
 static uint32_t buff_wr_pre_ptr = 0;
 static uint32_t buff_wr_done_ptr = 0;
 static uint32_t buff_rd_ptr = 0;
-static uint32_t buff_count;
 
 static dma_channel_config dma_config0;
 static dma_channel_config dma_config1;
