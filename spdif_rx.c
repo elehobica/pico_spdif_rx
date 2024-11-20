@@ -216,6 +216,10 @@ static inline uint32_t* _to_buff_ptr(uint32_t ptr)
 __attribute__((weak))
 void spdif_rx_callback_func(uint32_t* buff, uint32_t sub_frame_count, uint8_t c_bits[SPDIF_BLOCK_SIZE / 16], bool parity_err)
 {
+    (void) buff;
+    (void) sub_frame_count;
+    (void) c_bits;
+    (void) parity_err;
     return;
 }
 
@@ -435,6 +439,9 @@ static void _spdif_rx_common_end()
 
 static int64_t _spdif_rx_capture_timeout(alarm_id_t id, void* user_data)
 {
+    (void) id;
+    (void) user_data;
+
     _clear_timer();
     _spdif_rx_common_end();
     _set_timer_after_by_ms(_spdif_rx_capture_retry, capture_retry_interval_ms);
@@ -443,6 +450,9 @@ static int64_t _spdif_rx_capture_timeout(alarm_id_t id, void* user_data)
 
 static int64_t _spdif_rx_capture_retry(alarm_id_t id, void* user_data)
 {
+    (void) id;
+    (void) user_data;
+
     _clear_timer();
     _spdif_rx_capture_start();
     _set_timer_after_by_us(_spdif_rx_capture_timeout, capture_timeout_us);
@@ -564,6 +574,9 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inve
 
 static int64_t _spdif_rx_decode_timeout(alarm_id_t id, void* user_data)
 {
+    (void) id;
+    (void) user_data;
+
     state = SPDIF_RX_STATE_NO_SIGNAL;
     if ((gcfg.flags & SPDIF_RX_FLAG_CALLBACKS) && on_lost_stable_func != NULL) {
         (*on_lost_stable_func)();
@@ -785,7 +798,7 @@ void spdif_rx_get_c_bits(void* ptr, size_t size, uint32_t offset)
 {
     uint32_t save = save_and_disable_interrupts(); // to avoid getting incomplete set of c_bits
     uint8_t* bptr = (uint8_t*) ptr;
-    for (int i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
         if (offset + i >= SPDIF_BLOCK_SIZE / 16) {
             break;
         }
