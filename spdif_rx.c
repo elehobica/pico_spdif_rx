@@ -487,6 +487,37 @@ static bool _spdif_rx_check_criteria(int samp_freq_id, int value, spdif_rx_samp_
     return false;
 }
 
+static int _spdif_count_leading_zeros(uint32_t v)
+{
+    if (v == 0) {
+        return 32;
+    }
+
+    uint8_t r = 0;
+
+    if ((v & 0xFFFF0000) == 0) {
+        v <<= 16;
+        r += 16;
+    }
+    if ((v & 0xFF000000) == 0) {
+        v <<= 8;
+        r += 8;
+    }
+    if ((v & 0xF0000000) == 0) {
+        v <<= 4;
+        r += 4;
+    }
+    if ((v & 0xC0000000) == 0) {
+        v <<= 2;
+        r += 2;
+    }
+    if ((v & 0x80000000) == 0) {
+        r += 1;
+    }
+
+    return r;
+}
+
 static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inverted)
 {
     // sampled data analysis to calculate min_edge_interval, max_edge_interval for both 0 and 1
@@ -502,7 +533,7 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inve
         int bit_pos = 0; // position within current dword
         int word_idx = 0;
         while (true) {
-            int r = __builtin_clz((cur) ? ~shift_reg : shift_reg); // leading zeros
+            int r = _spdif_count_leading_zeros((cur) ? ~shift_reg : shift_reg); // leading zeros
             if (r + bit_pos <= 31) { // found within remaining part of 32bit dword?
                 pos += r; // go to the found edge position
                 cur = 1 - cur; // toggle to other edge index
