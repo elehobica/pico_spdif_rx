@@ -491,7 +491,6 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inve
         int cur = 1; // edge toggle, PIO sample started with a rising edge
         int num_check_words = SPDIF_RX_CAPTURE_SIZE;
         uint32_t shift_reg = fifo_buff[0];
-        //printf("shift_reg = %032b\n", shift_reg);
         int bit_pos = 0; // position within current dword
         int word_idx = 0;
         while (true) {
