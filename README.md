@@ -1,13 +1,17 @@
-# Raspberry Pi Pico S/PDIF receiver library
+# S/PDIF receiver library for Raspberry Pi Pico series
 
 ## Overview
-* S/PDIF receiver by rp2040 PIO function
-* format: 2ch, 16bit or 24bit
-* sampling frequency: 44.1 KHz, 48.0 KHz, 88.2 KHz, 96.0 KHz, 176.4 KHz, 192.0 KHz
-* signal detecting function for all supported sampling frequencies
+* S/PDIF receiver with sampling frequency detection by PIO function
+* Supported format:
+  * Channels: 2 (Stereo)
+  * Bit resolution: 16bit and 24bit
+* Supported sampling frequencies:
+  * 44.1 KHz, 48.0 KHz, 88.2 KHz, 96.0 KHz, 176.4 KHz and 192.0 KHz for Raspberry Pi Pico (rp2040)
+  * 44.1 KHz, 48.0 KHz, 88.2 KHz and 96.0 KHz for Raspberry Pi Pico 2 (rp2350)
 
 ## Supported Board and Peripheral Devices
 * Raspberry Pi Pico (rp2040)
+* Raspberry Pi Pico 2 (rp2350)
 * S/PDIF Coaxial or TOSLINK Rx module (DLR1160 or equivalent)
 
 ## Pin Assignment & Connection
@@ -27,15 +31,15 @@ Notes:
 * See ["Getting started with Raspberry Pi Pico"](https://datasheets.raspberrypi.org/pico/getting-started-with-pico.pdf)
 * Put "pico-sdk", "pico-examples" and "pico-extras" on the same level with this project folder.
 * Set environmental variables for PICO_SDK_PATH, PICO_EXTRAS_PATH and PICO_EXAMPLES_PATH
-* Confirmed with Pico SDK 2.0.0
+* Confirmed with Pico SDK 2.1.1
 ```
-> git clone -b 2.0.0 https://github.com/raspberrypi/pico-sdk.git
+> git clone -b 2.1.1 https://github.com/raspberrypi/pico-sdk.git
 > cd pico-sdk
 > git submodule update -i
 > cd ..
-> git clone -b sdk-2.0.0 https://github.com/raspberrypi/pico-examples.git
+> git clone -b sdk-2.1.1 https://github.com/raspberrypi/pico-examples.git
 >
-> git clone -b sdk-2.0.0 https://github.com/raspberrypi/pico-extras.git
+> git clone -b sdk-2.1.1 https://github.com/raspberrypi/pico-extras.git
 > 
 > git clone -b main https://github.com/elehobica/pico_spdif_rx.git
 ```
@@ -46,20 +50,22 @@ Notes:
 ```
 > cd pico_spdif_rx\samples\xxxxx  # sample project directory
 > mkdir build && cd build
-> cmake -G "NMake Makefiles" ..
+> cmake -G "NMake Makefiles" ..  ; (for Raspberry Pi Pico 1 series)
+> cmake -G "NMake Makefiles" -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 ..  ; (for Raspberry Pi Pico 2)
 > nmake
 ```
-* Put "xxxxx.uf2" on RPI-RP2 drive
+* Put "*.uf2" on RPI-RP2 or RP2350 drive
 ### Linux
-* Build is confirmed with [pico-sdk-dev-docker:sdk-2.0.0-1.0.0]( https://hub.docker.com/r/elehobica/pico-sdk-dev-docker)
+* Build is confirmed with [pico-sdk-dev-docker:sdk-2.1.1-1.0.0]( https://hub.docker.com/r/elehobica/pico-sdk-dev-docker)
 * Confirmed with cmake-3.22.1 and arm-none-eabi-gcc (15:10.3-2021.07-4) 10.3.1
 ```
 $ cd pico_spdif_rx/samples/xxxxx  # sample project directory
 $ mkdir build && cd build
-$ cmake ..
+$ cmake ..  # (for Raspberry Pi Pico 1 series)
+$ cmake -DPICO_PLATFORM=rp2350 -DPICO_BOARD=pico2 ..  # (for Raspberry Pi Pico 2)
 $ make -j4
 ```
-* Download "xxxxx.uf2" on RPI-RP2 drive
+* Download "*.uf2" on RPI-RP2 or RP2350 drive
 
 ## Decode output format
 * 32bit output for each S/PDIF sub frame including header, audio data, AUX, VUCP

@@ -19,10 +19,9 @@
 #include "spdif_rx_96000.pio.h"
 #include "spdif_rx_192000.pio.h"
 
-#define SYSTEM_CLK_FREQUENCY (125000000)
 // sample words to detect is equivalent to 64*4+8 symbols (2 frames + sync) at 44.1 KHz @ 125 MHz clock
 // because at least one Sync M Code has to be included in sampled words (-> need 2 frames considering when head block hits)
-#define SPDIF_RX_CAPTURE_SIZE (((SYSTEM_CLK_FREQUENCY / SAMP_FREQ_44100 / 128 + 1) * (64 * 4 + 8) + 31) / 32)
+#define SPDIF_RX_CAPTURE_SIZE (((SPDIF_RX_PIO_CLK_FREQ / SAMP_FREQ_44100 / 128 + 1) * (64 * 4 + 8) + 31) / 32)
 
 #define spdif_rx_pio __CONCAT(pio, PICO_SPDIF_RX_PIO)
 #define DREQ_PIOx_RX0 __CONCAT(__CONCAT(DREQ_PIO, PICO_SPDIF_RX_PIO), _RX0)
@@ -84,10 +83,10 @@ typedef struct _spdif_rx_samp_freq_info_set_t {
         SAMP_FREQ_##sf, \
         SAMP_FREQ_##sf *  99 / 100, \
         SAMP_FREQ_##sf * 101 / 100, \
-        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 2 / 128) *  91 / 100, \
-        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 2 / 128) * 111 / 100, \
-        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 6 / 128) *  97 / 100, \
-        (SYSTEM_CLK_FREQUENCY / SAMP_FREQ_##sf * 6 / 128) * 104 / 100 \
+        (SPDIF_RX_PIO_CLK_FREQ / SAMP_FREQ_##sf * 2 / 128) *  91 / 100, \
+        (SPDIF_RX_PIO_CLK_FREQ / SAMP_FREQ_##sf * 2 / 128) * 111 / 100, \
+        (SPDIF_RX_PIO_CLK_FREQ / SAMP_FREQ_##sf * 6 / 128) *  97 / 100, \
+        (SPDIF_RX_PIO_CLK_FREQ / SAMP_FREQ_##sf * 6 / 128) * 104 / 100 \
     }
 // -9%, +11% is the minimum range which makes at least +- 1 cycles at 192000 Hz in 2 symbol length
 // -3%, +4% is the maximum range which doesn't overlap between near-by frequencies in 6 symbol length
@@ -175,7 +174,7 @@ static inline void _spdif_rx_program_init(PIO pio, uint sm, uint offset, uint en
 {
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);
-    gpio_pull_down(pin);
+    //gpio_pull_down(pin);
     if (inverted) {
         gpio_set_inover(pin, GPIO_OVERRIDE_INVERT);
     } else {
@@ -188,8 +187,9 @@ static inline void _spdif_rx_program_init(PIO pio, uint sm, uint offset, uint en
     sm_config_set_in_pins(&sm_config, pin); // PINCTRL_IN_BASE for wait
     sm_config_set_in_shift(&sm_config, true, false, 32); // shift_right, no autopush, 32bit
     sm_config_set_fifo_join(&sm_config, PIO_FIFO_JOIN_RX);
-    sm_config_set_clkdiv(&sm_config, 1);
-
+    const uint32_t div_int   = SPDIF_RX_SYS_CLK_FREQ / SPDIF_RX_PIO_CLK_FREQ;
+    const uint8_t  div_frac8 = (uint8_t) (((uint64_t) SPDIF_RX_SYS_CLK_FREQ * 256) / SPDIF_RX_PIO_CLK_FREQ - 256);
+    sm_config_set_clkdiv_int_frac8(&sm_config, div_int, div_frac8);
     pio_sm_init(pio, sm, offset, &sm_config);
     pio_sm_set_pins(pio, sm, 0); // clear pins
     pio_sm_clear_fifos(pio, sm);

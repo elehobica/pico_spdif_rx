@@ -35,6 +35,14 @@ extern "C" {
 #error PICO_SPDIF_RX_PIO must be 0 or 1
 #endif
 
+#if defined(RASPBERRYPI_PICO2)
+#define SPDIF_RX_SYS_CLK_FREQ (150000000)
+#define SPDIF_RX_PIO_CLK_FREQ (128000000)
+#else
+#define SPDIF_RX_SYS_CLK_FREQ (125000000)
+#define SPDIF_RX_PIO_CLK_FREQ SPDIF_RX_SYS_CLK_FREQ
+#endif
+
 #define SPDIF_RX_FLAGS_NONE         (0)
 #define SPDIF_RX_FLAG_CHECK_PARITY  (1<<0)
 #define SPDIF_RX_FLAG_C_BITS        (1<<1)
