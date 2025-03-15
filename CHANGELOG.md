@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * Get python3 path by FindPython3 for multi platforms
 * Support pico-sdk 2.1.1
 ### Added
-* Support Raspberry Pi Pico 2 board (up to 96.0 KHz)
+* Support Raspberry Pi Pico 2 series board (up to 96.0 KHz)
 
 ## [v0.9.2] - 2023-04-05
 ### Changed

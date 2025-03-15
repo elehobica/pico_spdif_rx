@@ -35,7 +35,7 @@ extern "C" {
 #error PICO_SPDIF_RX_PIO must be 0 or 1
 #endif
 
-#if defined(RASPBERRYPI_PICO2)
+#if defined(PICO_RP2350A)
 #define SPDIF_RX_SYS_CLK_FREQ (150000000)
 #define SPDIF_RX_PIO_CLK_FREQ (128000000)
 #else
