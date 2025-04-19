@@ -1,5 +1,7 @@
 # S/PDIF receiver library for Raspberry Pi Pico series
 
+[![Build](https://github.com/elehobica/pico_spdif_rx/actions/workflows/build-binaries.yml/badge.svg)](https://github.com/elehobica/pico_spdif_rx/actions/workflows/build-binaries.yml)
+
 ## Overview
 * S/PDIF receiver with sampling frequency detection by PIO function
 * Supported format:
