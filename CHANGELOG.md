@@ -5,12 +5,16 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+
+## [v0.9.3] - 2025-04-20
 ### Changed
 * Get python3 path by FindPython3 for multi platforms
 * Support pico-sdk 2.1.1
 ### Added
 * Support Raspberry Pi Pico 2 series board (up to 96.0 KHz)
 * Add GitHub Actions for build and release
+### Fixed
+* Rescue mulfunction for `__builtin_clz` optimization for `-O2`, `-O3` case (contributed by ldursw)
 
 ## [v0.9.2] - 2023-04-05
 ### Changed
