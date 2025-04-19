@@ -490,7 +490,7 @@ static bool _spdif_rx_check_criteria(int samp_freq_id, int value, spdif_rx_samp_
 static int _spdif_count_leading_zeros(uint32_t v)
 {
     // to avoid the optimization issue, the separate wrapper function is needed for the care of the zero input case of __builtin_clz()
-    return value == 0 ? 32 : __builtin_clz(value);
+    return v == 0 ? 32 : __builtin_clz(v);
 }
 
 static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inverted)
