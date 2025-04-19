@@ -74,3 +74,26 @@ jobs:
           path: |
             ${{ env.RELEASE_DIR }}/*.uf2
             ${{ env.RELEASE_DIR }}/*.elf
+
+  release-tag-condition:
+    runs-on: ubuntu-latest
+    outputs:
+      matched: ${{ steps.check.outputs.matched }}
+    steps:
+      - name: Check if Release Tag Condition Matched
+        id: check
+        run: |
+          if [[ ${{ github.ref_type }} == 'tag' && ${{ github.ref_name }} =~ ^v[0-9]+.[0-9]+.[0-9]+$ ]]; then
+            echo "matched=true" >> $GITHUB_OUTPUT
+            echo "Release tag condition matched"
+          else
+            echo "matched=false" >> $GITHUB_OUTPUT
+            echo "Release tag condition not matched"
+          fi
+
+  call-upload-release-asset:
+    needs: [build-detect-samp-freq, build-spdif-to-i2s-32b, release-tag-condition]
+    if: ${{ needs.release-tag-condition.outputs.matched == 'true' }}
+    uses: ./.github/workflows/upload-release-asset.yml
+    with:
+      source_run_id: ${{ github.run_id }}
