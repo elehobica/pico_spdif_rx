@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+### Added
 ## [v0.9.3] - 2025-04-20
 ### Changed
 * Get python3 path by FindPython3 for multi platforms

@@ -97,3 +97,4 @@ jobs:
     uses: ./.github/workflows/upload-release-asset.yml
     with:
       source_run_id: ${{ github.run_id }}
+      artifacts_dirs: "dist-binaries0 dist-binaries1"
