@@ -16,7 +16,6 @@ static constexpr uint8_t PIN_PICO_SPDIF_RX_DATA = 15;
 
 static constexpr int SAMPLES_PER_BUFFER = PICO_AUDIO_I2S_BUFFER_SAMPLE_LENGTH; // Samples / channel
 static constexpr int32_t DAC_ZERO = 1;
-static int16_t buf_s16[SAMPLES_PER_BUFFER*2]; // 16bit 2ch data before applying volume
 static audio_buffer_pool_t* ap = nullptr;
 static bool decode_flg = false;
 volatile static bool i2s_setup_flg = false;
@@ -158,7 +157,7 @@ void decode()
     }
 
     if (mute_flag) {
-        for (int i = 0; i < ab->sample_count; i++) {
+        for (uint32_t i = 0; i < ab->sample_count; i++) {
             samples[i*2+0] = DAC_ZERO;
             samples[i*2+1] = DAC_ZERO;
         }
@@ -186,7 +185,7 @@ void decode()
         uint32_t* buff;
         while (read_count < total_count) {
             uint32_t get_count = spdif_rx_read_fifo(&buff, total_count - read_count);
-            for (int j = 0; j < get_count / 2; j++) {
+            for (uint32_t j = 0; j < get_count / 2; j++) {
                 samples[i*2+0] = (int32_t) ((buff[j*2+0] & 0x0ffffff0) << 4) / 256 * volume + DAC_ZERO;
                 samples[i*2+1] = (int32_t) ((buff[j*2+1] & 0x0ffffff0) << 4) / 256 * volume + DAC_ZERO;
                 i++;
@@ -249,8 +248,8 @@ void i2s_setup(spdif_rx_samp_freq_t samp_freq)
     float samp_freq_actual = spdif_rx_get_samp_freq_actual();
     uint32_t c_bits;
     spdif_rx_get_c_bits(&c_bits, sizeof(c_bits), 0);
-    printf("Samp Freq = %d Hz (%6.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
-    printf("SPDIF C bits = %08x\n", c_bits);
+    printf("Samp Freq = %d Hz (%6.4f KHz)\n", static_cast<int>(samp_freq), samp_freq_actual / 1e3);
+    printf("SPDIF C bits = %08x\n", static_cast<int>(c_bits));
     if (ap != nullptr) {
         i2s_audio_deinit(); // less gap noise if deinit() is done when input is stable
     }
@@ -267,7 +266,7 @@ void i2s_setup(spdif_rx_samp_freq_t samp_freq)
     }
 }
 
-void on_stable_func(spdif_rx_samp_freq_t samp_freq)
+void on_stable_func(spdif_rx_samp_freq_t /*samp_freq*/)
 {
     // callback function should be returned as quick as possible
     i2s_setup_flg = true;

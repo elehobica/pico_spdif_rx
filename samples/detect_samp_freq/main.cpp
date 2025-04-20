@@ -40,7 +40,7 @@ void measure_freqs(void) {
     // Can't measure clk_ref / xosc as it is the ref
 }
 
-void on_stable_func(spdif_rx_samp_freq_t samp_freq)
+void on_stable_func(spdif_rx_samp_freq_t /*samp_freq*/)
 {
     // callback function should be returned as quick as possible
     stable_flg = true;
@@ -93,9 +93,9 @@ int main()
             float samp_freq_actual = spdif_rx_get_samp_freq_actual();
             uint32_t c_bits;
             spdif_rx_get_c_bits(&c_bits, sizeof(c_bits), 0);
-            printf("Samp Freq = %d Hz (%7.4f KHz)\n", (int) samp_freq, samp_freq_actual / 1e3);
-            printf("c_bits = 0x%08x\n", c_bits);
-            printf("parity errors = %d\n", spdif_rx_get_parity_err_count());
+            printf("Samp Freq = %d Hz (%7.4f KHz)\n", static_cast<int>(samp_freq), samp_freq_actual / 1e3);
+            printf("c_bits = 0x%08x\n", static_cast<int>(c_bits));
+            printf("parity errors = %d\n", static_cast<int>(spdif_rx_get_parity_err_count()));
         }
         tight_loop_contents();
         sleep_ms(10);
