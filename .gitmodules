@@ -1,0 +1,3 @@
+[submodule "samples/lib/pico_audio_i2s_32b"]
+	path = samples/lib/pico_audio_i2s_32b
+	url = https://github.com/elehobica/pico_audio_i2s_32b.git

@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Changed
+* Use pico_audio_i2s_32b submodule
 
 ### Added
 ## [v0.9.3] - 2025-04-20

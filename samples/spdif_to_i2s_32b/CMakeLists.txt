@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD 17)
 pico_sdk_init()
 
 add_subdirectory(../.. pico_spdif_rx)
-add_subdirectory(../lib/pico_audio_32b pico_audio_32b) # for extended audio.h
+add_subdirectory(../lib/pico_audio_i2s_32b/src/pico_audio_32b pico_audio_32b)
 add_subdirectory(../lib/pico_audio_i2s_32b pico_audio_i2s_32b)
 
 # select sample application here (choose only one)
