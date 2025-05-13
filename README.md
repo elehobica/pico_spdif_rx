@@ -80,6 +80,9 @@ $ make -j4
 ### spdif_to_i2s_32b
 * convert S/PDIF input to I2S 32bit output
 
+## For more detail about internal code structure
+* See [DeepWiki](https://deepwiki.com/elehobica/pico_spdif_rx) (powered by [Devin](https://app.devin.ai/invite/WFPByHrQP7TwsUuq))
+
 ## Application Examples
 * [pico_spdif_recorder](https://github.com/elehobica/pico_spdif_recorder)
 * [pico_spdif_dac_hpamp](https://github.com/elehobica/pico_spdif_dac_hpamp)
