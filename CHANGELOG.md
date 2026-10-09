@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * Use pico_audio_i2s_32b submodule
 
 ### Added
+* Add `spdif_rx_set_max_samp_freq()` to ignore sampling frequencies above the limit (e.g. for S/PDIF Rx modules not capable of 176.4 KHz / 192.0 KHz)
+
 ## [v0.9.3] - 2025-04-20
 ### Changed
 * Get python3 path by FindPython3 for multi platforms

@@ -126,6 +126,7 @@ static spdif_rx_state_t state;
 
 static void (*on_stable_func)(spdif_rx_samp_freq_t samp_freq) = NULL;
 static void (*on_lost_stable_func)() = NULL;
+static volatile spdif_rx_samp_freq_t samp_freq_limit = SAMP_FREQ_192000;
 
 static uint32_t fifo_buff[SPDIF_RX_FIFO_SIZE];
 static uint32_t buff_wr_pre_ptr = 0;
@@ -487,6 +488,11 @@ static bool _spdif_rx_check_criteria(int samp_freq_id, int value, spdif_rx_samp_
     return false;
 }
 
+static inline bool _spdif_rx_samp_freq_allowed(int samp_freq_id)
+{
+    return sf_info_sets[samp_freq_id].sf <= samp_freq_limit;
+}
+
 static int _spdif_count_leading_zeros(uint32_t v)
 {
     // to avoid the optimization issue, the separate wrapper function is needed for the care of the zero input case of __builtin_clz()
@@ -552,6 +558,9 @@ static int _spdif_rx_analyze_capture(spdif_rx_samp_freq_t* samp_freq, bool* inve
     // evaluate analysis result to confirm if it meets criteria of sampling frequencies
     // use the interval of same edges which is free from signal transition difference between rising and falling
     for (int sf_id = 0; sf_id < _NUM_SAMP_FREQ_IDS_; sf_id++) {
+        if (!_spdif_rx_samp_freq_allowed(sf_id)) {
+            continue; // ignore sampling frequencies above the limit (stay in no signal)
+        }
         // Judge frequency: thanks to great idea by IDC-Dragon
         // focusing on Sync Code M which appears in L sub-frame (except for head frame in the block)
         //                                                                            |<---->|
@@ -720,6 +729,9 @@ void __isr __time_critical_func(spdif_rx_dma_irq_handler)()
         samp_freq_actual = bitrate_16b / 32.0;
         spdif_rx_samp_freq_t sf = SAMP_FREQ_NONE;
         for (int sf_id = 0; sf_id < _NUM_SAMP_FREQ_IDS_; sf_id++) {
+            if (!_spdif_rx_samp_freq_allowed(sf_id)) {
+                continue; // in case the limit is lowered while decoding
+            }
             if (_spdif_rx_check_criteria(sf_id, (int) (samp_freq_actual + 0.5), CHK_SAMP_FREQ)) {
                 sf = sf_info_sets[sf_id].sf;
                 break;
@@ -783,6 +795,11 @@ void spdif_rx_set_callback_on_stable(void (*func)(spdif_rx_samp_freq_t samp_freq
 void spdif_rx_set_callback_on_lost_stable(void (*func)())
 {
     on_lost_stable_func = func;
+}
+
+void spdif_rx_set_max_samp_freq(spdif_rx_samp_freq_t max_samp_freq)
+{
+    samp_freq_limit = max_samp_freq;
 }
 
 spdif_rx_state_t spdif_rx_get_state()

@@ -108,6 +108,14 @@ void spdif_rx_set_callback_on_stable(void (*func)(spdif_rx_samp_freq_t samp_freq
 void spdif_rx_set_callback_on_lost_stable(void (*func)());
 
 /**
+* set max sampling frequency to detect
+* (sampling frequencies above it are ignored, i.e. treated as no signal)
+*
+* @param[in] max_samp_freq max sampling frequency, SAMP_FREQ_192000 by default (no limit)
+*/
+void spdif_rx_set_max_samp_freq(spdif_rx_samp_freq_t max_samp_freq);
+
+/**
 * get status
 *
 * @return spdif_rx_state_t SPDIF_RX_STATE_NO_SIGNAL or SPDIF_RX_STATE_WAITING_STABLE or SPDIF_RX_STATE_STABLE

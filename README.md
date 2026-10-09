@@ -10,6 +10,7 @@
 * Supported sampling frequencies:
   * 44.1 KHz, 48.0 KHz, 88.2 KHz, 96.0 KHz, 176.4 KHz and 192.0 KHz for Raspberry Pi Pico (rp2040)
   * 44.1 KHz, 48.0 KHz, 88.2 KHz and 96.0 KHz for Raspberry Pi Pico 2 (rp2350)
+  * The upper limit can be lowered by `spdif_rx_set_max_samp_freq()` (e.g. for S/PDIF Rx modules not capable of 176.4 KHz / 192.0 KHz)
 
 ## Supported Board and Peripheral Devices
 * Raspberry Pi Pico (rp2040)
