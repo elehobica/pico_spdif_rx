@@ -2,3 +2,4 @@
 build*/
 *.kvset
 CLAUDE.md
+.claude/
